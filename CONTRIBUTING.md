@@ -44,6 +44,21 @@ Rules checked by CI and by the `commit-msg` hook:
 Use the body to explain why, not what. When a commit fixes a rule that failed under
 testing, name the stress case in the body (for example `Stress case: A5`).
 
+## Pull requests
+
+- **One concern per pull request.** A reviewer should be able to hold the whole change in mind.
+  Aim for under 400 changed lines; split larger work into a sequence of pull requests.
+- **The title follows the commit convention** (`feat(gate): deny reused approvals`). CI checks it.
+- **The description fills in the template:** what changes, why, and how it was verified with the
+  actual commands and results. "Tested" without evidence is not verification.
+- **State what is not included** when a reader might expect it.
+- **Refactors and behaviour changes go in separate pull requests.**
+- **Draft pull requests** are for early feedback. Mark ready only when CI is green.
+- **Review:** the owner reviews every pull request. The author answers each comment with a
+  change or a reason. Nobody merges their own unreviewed work into `main`.
+- **Never force-push a branch after review has started,** except to fix a commit message
+  that CI rejected. Add commits instead, so the reviewer can see what changed.
+
 ## Naming
 
 | Thing | Convention | Example |
@@ -85,6 +100,55 @@ A task is done when all of these are true:
 4. For deployed changes: the change was verified in AWS and the evidence is in the pull request.
 
 "Merged" and "works in AWS" are different states. Say which one you mean.
+
+## Functions and modules
+
+- **A function does one thing** and its name says what. If you need "and" to describe it, split it.
+- **Small by default:** at most 5 parameters, 30 statements and a complexity of 8. Ruff enforces
+  these limits; raising one needs a comment that explains why.
+- **Decision logic is pure.** Functions that decide allow or deny take plain data and return a
+  result. They do not call AWS, read the clock or read the environment. Handlers at the edge
+  gather the inputs and call them. This is what makes the rules testable.
+- **Explicit inputs and outputs.** No hidden global state; pass dependencies in.
+- **Typed data, not loose dictionaries.** Use `dataclass(frozen=True)` or `TypedDict` for
+  structured values that cross a function boundary.
+- **Errors are specific.** Raise a named exception with a message that says what was expected.
+  Never use a bare `except` or swallow an error silently; catching `Exception` is allowed only
+  at a handler boundary that then denies.
+- **Docstrings** describe the contract in one line, plus arguments and failure cases when they
+  are not obvious. Comments explain why, never what.
+- **No dead code:** no commented-out blocks, no unused parameters, no `print` in library code.
+- **One concept per module.** A module that grows past about 300 lines is doing too much.
+
+## Repository layout
+
+```
+src/fareguard/        Library code: pure decision logic and typed models
+  gate/               Rule evaluation used by the hook
+  tools/              Implementations of the agent's tools
+  handlers/           Thin AWS Lambda entry points; no business logic
+infra/                Terraform: everything that exists in AWS
+harness/              Harness configuration and the script that creates it
+stress/               Adversarial cases and the runner that scores them
+scripts/              Developer and CI utilities
+tests/                Mirrors src/: tests/gate/test_caps.py tests src/fareguard/gate/caps.py
+docs/
+  decisions/          Decision records
+  stress/             Recorded results, including failures
+  architecture.md     How each rule is enforced
+```
+
+Rules for files:
+
+- **A file lives where its kind lives.** Do not add top-level directories without a decision record.
+- **Tests mirror the source tree,** one test module per source module.
+- **File names** are `snake_case` for Python and Terraform, `kebab-case` for Markdown and YAML.
+- **Generated and local files are never committed:** virtual environments, caches, Terraform
+  state, plans, build output and `.env` files. If Git shows one, fix `.gitignore`.
+- **Binary files** (screenshots, diagrams) go in `docs/assets/`, are kept small and are
+  referenced from a document. No orphan files.
+- **Delete, do not disable.** Remove files that are no longer used; Git keeps the history.
+- **Configuration has one home.** Tool settings live in `pyproject.toml`, not in scattered files.
 
 ## Code standards
 
