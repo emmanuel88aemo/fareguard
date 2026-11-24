@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, edited, synchronize, reopened]
   push:
     branches: [main]
 
@@ -14,7 +15,7 @@ concurrency:
 
 jobs:
   commits:
-    name: Commit messages
+    name: Commit messages and title
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -28,6 +29,10 @@ jobs:
         run: >
           python scripts/check_commit_messages.py
           --range "origin/${{ github.base_ref }}..${{ github.event.pull_request.head.sha }}"
+      - name: Check pull request title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: python scripts/check_commit_messages.py --subject "$PR_TITLE"
 
   quality:
     name: Lint, types and tests
