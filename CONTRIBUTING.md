@@ -44,6 +44,48 @@ Rules checked by CI and by the `commit-msg` hook:
 Use the body to explain why, not what. When a commit fixes a rule that failed under
 testing, name the stress case in the body (for example `Stress case: A5`).
 
+## Naming
+
+| Thing | Convention | Example |
+|---|---|---|
+| Branch | `<type>/<short-description>`, kebab-case | `feat/spend-gate` |
+| Python module, function, variable | `snake_case` | `monthly_spend` |
+| Python class | `PascalCase` | `ApprovalRecord` |
+| Python constant | `UPPER_SNAKE_CASE` | `MAX_USD_PER_JOB` |
+| Test | `test_<behaviour>` describing the outcome | `test_reused_approval_is_denied` |
+| Agent tool | `snake_case` verb phrase | `request_approval` |
+| Rule | `R<n>`, stable once published | `R4` |
+| Stress case | `A<n>`, stable once published | `A5` |
+| Terraform resource label | `snake_case` | `aws_lambda_function.spend_gate` |
+| AWS resource name | `fareguard-<env>-<component>`, kebab-case | `fareguard-dev-spend-gate` |
+| Environment variable | `FAREGUARD_<NAME>` | `FAREGUARD_MONTHLY_CAP_USD` |
+| Decision record | `docs/decisions/NNNN-<title>.md` | `0001-enforce-rules-outside-the-model.md` |
+
+Every AWS resource carries the tags `Project = fareguard`, `Environment` and `ManagedBy = terraform`.
+Rule and stress-case identifiers are never renumbered: the write-up, the tests and the code refer to them.
+
+## How work is organised
+
+- **One issue per task.** An issue states the goal, the scope and how it will be verified.
+  Its pull request closes it with `Closes #<n>`.
+- **Decisions are written down.** A choice that is hard to reverse, or that someone will
+  later ask "why?" about, gets a short record in `docs/decisions/` before the code changes.
+- **Failures are kept.** When a rule fails a stress test, record the failing case in
+  `docs/stress/` before fixing it. The fix commit references the case.
+- **Versions** follow [Semantic Versioning](https://semver.org/). `CHANGELOG.md` is updated in
+  the pull request that makes the change.
+
+### Definition of done
+
+A task is done when all of these are true:
+
+1. CI is green and the pull request is merged into `main`.
+2. New enforcement logic has a test that fails without it.
+3. Documentation that describes the changed behaviour is updated in the same pull request.
+4. For deployed changes: the change was verified in AWS and the evidence is in the pull request.
+
+"Merged" and "works in AWS" are different states. Say which one you mean.
+
 ## Code standards
 
 - **Python 3.12.** Every function, method and module-level constant is type annotated.
