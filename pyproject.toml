@@ -43,13 +43,31 @@ select = [
     "RUF",
     "ANN",     # every function is annotated
     "D",       # docstrings
+    "C90",     # cyclomatic complexity
+    "PL",      # pylint: argument counts, branches, statements
+    "BLE",     # no blind except
+    "ARG",     # no unused arguments
+    "ERA",     # no commented-out code
+    "PTH",     # pathlib over os.path
+    "T20",     # no print in library code
+    "TRY",     # exception handling
 ]
 ignore = [
     "D203", "D213",  # conflict with D211/D212
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "D"]  # asserts are the point of tests; test names document themselves
+"tests/**" = ["S101", "D", "PLR2004"]  # asserts and literal expectations are the point of tests
+"scripts/**" = ["T20"]  # command-line scripts report through stdout and stderr
+
+[tool.ruff.lint.mccabe]
+max-complexity = 8
+
+[tool.ruff.lint.pylint]
+max-args = 5
+max-branches = 8
+max-returns = 4
+max-statements = 30
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
