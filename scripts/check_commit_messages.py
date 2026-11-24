@@ -3,6 +3,7 @@
 Usage:
     python scripts/check_commit_messages.py --range origin/main..HEAD
     python scripts/check_commit_messages.py --file .git/COMMIT_EDITMSG
+    python scripts/check_commit_messages.py --subject "feat: add spend gate"
 """
 
 from __future__ import annotations
@@ -84,13 +85,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--range", dest="revision_range", help="git revision range to check")
     source.add_argument("--file", type=Path, help="commit message file to check")
+    source.add_argument("--subject", help="a single subject, such as a pull request title")
     args = parser.parse_args(argv)
 
-    subjects = (
-        subjects_in_range(args.revision_range)
-        if args.revision_range is not None
-        else [subject_in_file(args.file)]
-    )
+    if args.revision_range is not None:
+        subjects = subjects_in_range(args.revision_range)
+    elif args.file is not None:
+        subjects = [subject_in_file(args.file)]
+    else:
+        subjects = [args.subject]
 
     failed = False
     for subject in subjects:

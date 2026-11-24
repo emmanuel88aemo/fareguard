@@ -66,3 +66,8 @@ def test_main_rejects_an_invalid_file(tmp_path: Path, capsys: pytest.CaptureFixt
     message.write_text("wip\n", encoding="utf-8")
     assert ccm.main(["--file", str(message)]) == 1
     assert "must look like" in capsys.readouterr().err
+
+
+def test_main_checks_a_pull_request_title() -> None:
+    assert ccm.main(["--subject", "ci: validate pull request titles"]) == 0
+    assert ccm.main(["--subject", "Validate titles"]) == 1
