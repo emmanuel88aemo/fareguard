@@ -167,6 +167,10 @@ Rules for files:
 ## Infrastructure
 
 - Everything in AWS is declared in `infra/` with Terraform. Nothing is created by hand in the console.
+- **One exception:** the opt-in AWS tests (see [Tests against real DynamoDB](#tests-against-real-dynamodb))
+  may create and delete one temporary table, tagged `Project = fareguard`, outside Terraform.
+  It carries no `Environment` or `ManagedBy` tag because it belongs to no environment and
+  Terraform does not manage it.
 - IAM policies name exact actions and resources. A wildcard needs a comment that justifies it.
 - `terraform fmt` and `terraform validate` must pass.
 
