@@ -24,6 +24,20 @@ All notable changes to this project are recorded here. The format follows
   67 of 68 tests passed, including the concurrent launches and the order in which failed
   conditions are reported. The one failure showed that DynamoDB drops the trailing zeros of a
   number, so an amount written as 0.20 was read back as 0.2; moto keeps them and had hidden it.
+- Hook decision logic for the AgentCore harness: `decide` answers a `before_tool_call` event
+  with allow or deny from the gate's outcome and returns a record for logging that never holds
+  the arguments. Any other event type and a missing, truncated or malformed tool input are
+  denied with R5, as is a call whose evaluation fails. A tool name may carry a gateway target
+  prefix, `<target>___<tool>`; that format is an assumption to confirm at deploy time.
+- The reason returned by the hook is a fixed sentence per rule that starts with the rule id.
+  It contains no text from the event, so it is shorter than the gate's own reason: it names
+  no disc, approval or amount.
+- Lambda configuration from the environment variables `FAREGUARD_TABLE_NAME`,
+  `FAREGUARD_MAX_USD_PER_DISC`, `FAREGUARD_MONTHLY_CAP_USD` and `FAREGUARD_USD_PER_MINUTE`.
+  All are required and none has a default.
+- Hook Lambda handler: it builds the DynamoDB client, the store and the limits once per
+  container, logs one JSON line per decision and denies with R5 on any error, including a
+  missing or invalid environment variable. It is not deployed: no Terraform exists yet.
 
 ### Fixed
 
