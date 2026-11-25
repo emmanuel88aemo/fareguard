@@ -1,7 +1,8 @@
-# The role of the hook Lambda. The hook reads the ledger to decide; it never writes.
+# The role of the hook Lambda. The hook reads the ledger to decide; it never
+# writes. It applies one guardrail to the text it screens.
 resource "aws_iam_role" "hook_lambda" {
   name               = "${local.name_prefix}-hook-lambda"
-  description        = "Hook Lambda: reads the ledger and writes its own log."
+  description        = "Hook Lambda: reads the ledger, applies the guardrail and writes its own log."
   assume_role_policy = data.aws_iam_policy_document.lambda_trust.json
 }
 
@@ -11,6 +12,15 @@ data "aws_iam_policy_document" "hook_lambda" {
     effect    = "Allow"
     actions   = ["dynamodb:Query", "dynamodb:GetItem"]
     resources = [aws_dynamodb_table.ledger.arn]
+  }
+
+  # This guardrail and no other. The ARN of a guardrail holds no version: the
+  # function chooses the published version by its number.
+  statement {
+    sid       = "ApplyGuardrail"
+    effect    = "Allow"
+    actions   = ["bedrock:ApplyGuardrail"]
+    resources = [aws_bedrock_guardrail.hook.guardrail_arn]
   }
 
   statement {
@@ -24,7 +34,7 @@ data "aws_iam_policy_document" "hook_lambda" {
 }
 
 resource "aws_iam_role_policy" "hook_lambda" {
-  name   = "ledger-read-and-own-log"
+  name   = "ledger-read-guardrail-and-own-log"
   role   = aws_iam_role.hook_lambda.name
   policy = data.aws_iam_policy_document.hook_lambda.json
 }
