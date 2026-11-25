@@ -62,3 +62,13 @@ output "gateway_url" {
   description = "URL of the MCP endpoint of the gateway."
   value       = aws_bedrockagentcore_gateway.tools.gateway_url
 }
+
+output "guardrail_id" {
+  description = "Id of the guardrail, the value of FAREGUARD_GUARDRAIL_ID."
+  value       = aws_bedrock_guardrail.hook.guardrail_id
+}
+
+output "guardrail_version" {
+  description = "Published version of the guardrail the hook applies, the value of FAREGUARD_GUARDRAIL_VERSION."
+  value       = aws_bedrock_guardrail_version.hook.version
+}

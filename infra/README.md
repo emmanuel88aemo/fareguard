@@ -26,9 +26,9 @@ No workflow plans or applies this yet: a person runs the commands below.
 | Role of the gateway | `fareguard-<env>-gateway` |
 | AgentCore Gateway | `fareguard-<env>-gateway` |
 | Target of the gateway, the tools function | `fareguard` |
+| Bedrock Guardrail and one published version of it | `fareguard-<env>-guardrail` |
 
-It creates no guardrail or harness yet, so nothing calls the gateway or invokes the hook
-function.
+It creates no harness yet, so nothing calls the gateway or invokes the hook function.
 
 ### The Lambda functions
 
@@ -38,7 +38,7 @@ function.
 | tools | `fareguard.handlers.tools_handler.lambda_handler` | 15 s |
 
 Both run on `python3.12` and `arm64` with 256 MB, use the role and the log group listed
-above, and receive the same environment variables:
+above, and receive these environment variables:
 
 | Environment variable | Value | Terraform variable | Default |
 |---|---|---|---|
@@ -50,6 +50,13 @@ above, and receive the same environment variables:
 The three limits are strings that hold a positive decimal with at most two decimals. To
 change one, copy `main/terraform.tfvars.example` to `main/terraform.tfvars`, which Git
 ignores, or pass `-var`.
+
+The hook function receives two more, which the tools function does not:
+
+| Environment variable | Value |
+|---|---|
+| `FAREGUARD_GUARDRAIL_ID` | the id of the guardrail |
+| `FAREGUARD_GUARDRAIL_VERSION` | the number of its published version |
 
 ### How the package is built
 
@@ -93,6 +100,27 @@ created.
 The function has no resource policy. The gateway and the function are in the same account,
 where the policy of the gateway's role is enough to invoke it.
 
+### The guardrail
+
+The hook function applies the guardrail, through the `ApplyGuardrail` API, to what a caller
+sends (`before_invocation`) and to what a tool returns (`after_tool_call`). It is not
+attached to a harness or to a model, and no rule depends on it: see
+[decision record 0006](../docs/decisions/0006-guardrail-applied-by-the-hook.md).
+
+| Policy | Setting |
+|---|---|
+| Content filter | `PROMPT_ATTACK`, strength `HIGH` on input, blocking |
+| Denied topic | asking the agent to change, lift or ignore its spending limits or approval rules |
+| Blocked messages | one fixed sentence; the hook does not pass it on |
+
+The hook applies a published version by its number, never the working draft. A version
+does not follow its guardrail, so any change to the guardrail publishes a new version in
+the same apply, gives its number to the hook function and only then deletes the old one.
+A guardrail keeps at most 20 versions; this stack keeps one.
+
+Each call is billed per 1,000 characters of text and per policy; record 0006 has the
+figures.
+
 ### What the roles may do
 
 The two Lambda roles are trusted by `lambda.amazonaws.com` only. The gateway role is trusted
@@ -102,6 +130,7 @@ one inline policy and no managed policy; Terraform removes any other policy it f
 | Role | Actions | On |
 |---|---|---|
 | hook | `dynamodb:Query`, `dynamodb:GetItem` | the ledger table |
+| hook | `bedrock:ApplyGuardrail` | the guardrail |
 | hook | `logs:CreateLogStream`, `logs:PutLogEvents` | the streams of its own log group |
 | tools | `dynamodb:Query`, `dynamodb:GetItem` | the ledger table |
 | tools | `dynamodb:PutItem` | items of the ledger table whose partition key is `APPROVAL` or `EVENT` |
@@ -159,8 +188,12 @@ After changing `backend.hcl`, run `terraform init -reconfigure -backend-config=b
 terraform plan -out=tfplan
 ```
 
-Read the plan. The first one creates 20 resources and destroys none. It also writes the zip
+Read the plan. The first one creates 22 resources and destroys none. It also writes the zip
 of the functions, so apply the plan from the same checkout that made it.
+
+On a stack that was applied before the guardrail existed, the plan that adds it replaces
+the inline policy of the hook role, because the policy has a new name. Expect that one
+resource to be destroyed and created again, and no other to be destroyed.
 
 ## 4. Apply
 
@@ -205,5 +238,5 @@ cd ../main && terraform init -backend=false && terraform validate
 
 `validate` checks that the configuration is consistent. It does not build the zip, and it
 does not check that AWS accepts the configuration, that the policies grant what the code
-needs, that the functions start or that the gateway reaches the tools function; only a plan
-and an apply show that.
+needs, that the functions start, that the gateway reaches the tools function or that the
+guardrail blocks anything; only a plan and an apply show that.

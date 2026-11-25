@@ -13,17 +13,25 @@ data "archive_file" "package" {
 }
 
 locals {
+  # What both functions read.
   lambda_environment = {
     FAREGUARD_TABLE_NAME       = aws_dynamodb_table.ledger.name
     FAREGUARD_MAX_USD_PER_DISC = var.max_usd_per_disc
     FAREGUARD_MONTHLY_CAP_USD  = var.monthly_cap_usd
     FAREGUARD_USD_PER_MINUTE   = var.usd_per_minute
   }
+
+  # What only the hook function reads: the guardrail it applies, by its id
+  # and the number of its published version.
+  hook_guardrail_environment = {
+    FAREGUARD_GUARDRAIL_ID      = aws_bedrock_guardrail.hook.guardrail_id
+    FAREGUARD_GUARDRAIL_VERSION = aws_bedrock_guardrail_version.hook.version
+  }
 }
 
 resource "aws_lambda_function" "hook" {
   function_name = local.hook_function_name
-  description   = "Answers the harness hook before every tool call with allow or deny."
+  description   = "Answers the lifecycle hooks of the harness with allow or deny."
   role          = aws_iam_role.hook_lambda.arn
 
   filename         = data.archive_file.package.output_path
@@ -35,7 +43,7 @@ resource "aws_lambda_function" "hook" {
   timeout          = 10
 
   environment {
-    variables = local.lambda_environment
+    variables = merge(local.lambda_environment, local.hook_guardrail_environment)
   }
 
   # Text keeps each line the handler writes as it is: one JSON object per call.

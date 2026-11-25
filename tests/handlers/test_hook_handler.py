@@ -6,11 +6,14 @@ from typing import TYPE_CHECKING, Any
 
 import boto3
 import pytest
+from botocore.stub import Stubber
 from moto import mock_aws
 
 from fareguard.gate.models import Limits
 from fareguard.handlers import hook_handler
 from fareguard.handlers.config import (
+    GUARDRAIL_ID,
+    GUARDRAIL_VERSION,
     MAX_USD_PER_DISC,
     MONTHLY_CAP_USD,
     TABLE_NAME,
@@ -355,3 +358,330 @@ def test_raw_tool_is_logged_cut_to_128_characters(capsys: pytest.CaptureFixture[
     lambda_handler(make_event("x" * 500, {}), None)
 
     assert logged(capsys)[0]["raw_tool"] == "x" * 128
+
+
+GUARDRAIL_ENVIRON = {GUARDRAIL_ID: "gr1abc2def3", GUARDRAIL_VERSION: "3"}
+QUESTION = "What is queued for today?"
+
+
+@pytest.fixture
+def guardrail(monkeypatch: pytest.MonkeyPatch) -> Iterator[Stubber]:
+    """The guardrail variables and a stubbed bedrock-runtime client: no request leaves the test.
+
+    The stubber fails a call it holds no response for. `built` on it lists the
+    clients the handler asked boto3 for.
+    """
+    for name, value in GUARDRAIL_ENVIRON.items():
+        monkeypatch.setenv(name, value)
+    client = boto3.client("bedrock-runtime")
+    stubber = Stubber(client)
+    built: list[tuple[str, dict[str, object]]] = []
+    real = boto3.client
+
+    def build(service: str, **options: object) -> object:
+        built.append((service, options))
+        return client if service == "bedrock-runtime" else real(service)  # type: ignore[call-overload]  # the service name is checked by the tests
+
+    monkeypatch.setattr(boto3, "client", build)
+    stubber.built = built  # type: ignore[attr-defined]  # carried to the tests that count clients
+    hook_handler._guardrail.cache_clear()
+    with stubber:
+        yield stubber
+    hook_handler._guardrail.cache_clear()
+
+
+def verdict(action: str, text: str) -> dict[str, object]:
+    """The response of ApplyGuardrail to `text`, assessed in full."""
+    return {
+        "usage": {
+            "topicPolicyUnits": 1,
+            "contentPolicyUnits": 1,
+            "wordPolicyUnits": 0,
+            "sensitiveInformationPolicyUnits": 0,
+            "sensitiveInformationPolicyFreeUnits": 0,
+            "contextualGroundingPolicyUnits": 0,
+        },
+        "action": action,
+        "outputs": [],
+        "assessments": [{}],
+        "guardrailCoverage": {"textCharacters": {"guarded": len(text), "total": len(text)}},
+    }
+
+
+def expect(stubber: Stubber, action: str, text: str) -> None:
+    """Make the guardrail answer the one request that carries exactly `text` as input."""
+    stubber.add_response(
+        "apply_guardrail",
+        verdict(action, text),
+        {
+            "guardrailIdentifier": "gr1abc2def3",
+            "guardrailVersion": "3",
+            "source": "INPUT",
+            "content": [{"text": {"text": text}}],
+        },
+    )
+
+
+def make_invocation(text: str = QUESTION, **context: object) -> dict[str, object]:
+    return {
+        "hookEventId": "evt-2",
+        "name": "fareguard-hook",
+        "event": "before_invocation",
+        "harnessArn": "arn:aws:bedrock-agentcore:us-east-1:000000000000:harness/test",
+        "sessionId": "session-1",
+        "context": {
+            "messageCount": 1,
+            "messages": [{"role": "user", "content": [{"text": text}]}],
+            **context,
+        },
+    }
+
+
+def make_tool_result(result: object, tool: str = "fareguard___read_ledger") -> dict[str, object]:
+    return {
+        "hookEventId": "evt-3",
+        "name": "fareguard-hook",
+        "event": "after_tool_call",
+        "harnessArn": "arn:aws:bedrock-agentcore:us-east-1:000000000000:harness/test",
+        "sessionId": "session-1",
+        "context": {
+            "toolName": tool,
+            "toolType": "agentcore_gateway",
+            "toolResult": result,
+            "toolUseId": "use-1",
+        },
+    }
+
+
+def test_invocation_the_guardrail_passes_is_allowed(
+    guardrail: Stubber, capsys: pytest.CaptureFixture[str]
+) -> None:
+    expect(guardrail, "NONE", QUESTION)
+
+    answer = lambda_handler(make_invocation(), None)
+
+    assert answer == {"decision": "allow", "reason": "allowed"}
+    guardrail.assert_no_pending_responses()
+    assert logged(capsys) == [
+        {
+            "hookEventId": "evt-2",
+            "sessionId": "session-1",
+            "event": "before_invocation",
+            "tool": None,
+            "raw_tool": None,
+            "allowed": True,
+            "rule": None,
+            "detail": "the guardrail did not block the text",
+            "error": None,
+        }
+    ]
+
+
+def test_invocation_the_guardrail_blocks_is_denied_with_r7(
+    guardrail: Stubber, capsys: pytest.CaptureFixture[str]
+) -> None:
+    expect(guardrail, "GUARDRAIL_INTERVENED", INJECTION)
+
+    answer = lambda_handler(make_invocation(INJECTION), None)
+
+    assert answer == {"decision": "deny", "reason": DENIAL_REASONS["R7"]}
+    captured = capsys.readouterr()
+    record = json.loads(captured.out)
+    assert (record["event"], record["rule"], record["allowed"]) == (
+        "before_invocation",
+        "R7",
+        False,
+    )
+    assert record["detail"] == "the guardrail blocked the text"
+    assert "IGNORE" not in captured.out + captured.err
+
+
+def test_tool_result_with_planted_text_is_denied_with_r7(
+    guardrail: Stubber, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Stress case: A2
+    result = {"untrusted_ledger_events": [{"type": "note", "detail": {"note": INJECTION}}]}
+    expect(
+        guardrail,
+        "GUARDRAIL_INTERVENED",
+        f"untrusted_ledger_events\ntype\nnote\ndetail\nnote\n{INJECTION}",
+    )
+
+    answer = lambda_handler(make_tool_result(result), None)
+
+    assert answer == {"decision": "deny", "reason": DENIAL_REASONS["R7"]}
+    captured = capsys.readouterr()
+    record = json.loads(captured.out)
+    assert (record["event"], record["rule"]) == ("after_tool_call", "R7")
+    assert (record["tool"], record["raw_tool"]) == ("read_ledger", "fareguard___read_ledger")
+    assert "IGNORE" not in captured.out + captured.err
+
+
+def test_tool_result_the_guardrail_passes_is_allowed(guardrail: Stubber) -> None:
+    expect(guardrail, "NONE", "pending")
+
+    assert lambda_handler(make_tool_result({"pending": []}), None)["decision"] == "allow"
+    guardrail.assert_no_pending_responses()
+
+
+@pytest.mark.parametrize("code", ["ThrottlingException", "AccessDeniedException"])
+def test_guardrail_that_fails_denies_with_r5(
+    code: str, guardrail: Stubber, capsys: pytest.CaptureFixture[str]
+) -> None:
+    guardrail.add_client_error("apply_guardrail", code, INJECTION)
+
+    assert lambda_handler(make_invocation(), None) == R5_DENIAL
+    captured = capsys.readouterr()
+    record = json.loads(captured.out)
+    # botocore raises a class named after the error code of the API.
+    assert (record["event"], record["rule"], record["error"]) == ("before_invocation", "R5", code)
+    assert INJECTION not in captured.out + captured.err
+
+
+def test_guardrail_that_did_not_guard_the_whole_text_denies_with_r5(
+    guardrail: Stubber, capsys: pytest.CaptureFixture[str]
+) -> None:
+    response = verdict("NONE", QUESTION)
+    response["guardrailCoverage"] = {"textCharacters": {"guarded": 3, "total": len(QUESTION)}}
+    guardrail.add_response("apply_guardrail", response)
+
+    assert lambda_handler(make_invocation(), None) == R5_DENIAL
+    assert logged(capsys)[0]["error"] == "IncompleteCoverageError"
+
+
+@pytest.mark.usefixtures("guardrail")
+def test_truncated_invocation_denies_with_r5_without_calling_the_guardrail(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The stubber holds no response: a call to the guardrail would fail the test below.
+    assert lambda_handler(make_invocation(truncated=True), None) == R5_DENIAL
+    record = logged(capsys)[0]
+    assert record["detail"] == "the context is truncated"
+    assert record["error"] is None
+
+
+@pytest.mark.usefixtures("guardrail")
+def test_truncated_tool_result_denies_with_r5_without_calling_the_guardrail(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    event = make_tool_result({"truncated": True, "preview": INJECTION[:10]})
+
+    assert lambda_handler(event, None) == R5_DENIAL
+    record = logged(capsys)[0]
+    assert record["detail"] == "the context is truncated"
+    assert record["error"] is None
+
+
+@pytest.mark.usefixtures("guardrail")
+@pytest.mark.parametrize("name", ["after_invocation", "on_message", "BEFORE_TOOL_CALL", "", None])
+def test_event_the_hook_does_not_know_denies_with_r5(
+    name: object, capsys: pytest.CaptureFixture[str]
+) -> None:
+    event = {**make_invocation(), "event": name}
+
+    assert lambda_handler(event, None) == R5_DENIAL
+    record = logged(capsys)[0]
+    assert record["detail"] == "the event is not one the hook answers"
+    assert record["event"] == name
+
+
+@pytest.mark.usefixtures("guardrail")
+@pytest.mark.parametrize("variable", sorted(GUARDRAIL_ENVIRON))
+def test_missing_guardrail_variable_denies_a_screened_event_with_r5(
+    variable: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv(variable)
+
+    assert lambda_handler(make_invocation(), None) == R5_DENIAL
+    assert lambda_handler(make_tool_result("done"), None) == R5_DENIAL
+    assert [record["error"] for record in logged(capsys)] == ["ConfigError", "ConfigError"]
+
+
+@pytest.mark.usefixtures("guardrail")
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        (GUARDRAIL_ID, ""),
+        (GUARDRAIL_ID, "arn:aws:bedrock:us-east-1:000000000000:guardrail/gr1abc2def3"),
+        (GUARDRAIL_VERSION, "DRAFT"),
+        (GUARDRAIL_VERSION, "0"),
+    ],
+)
+def test_invalid_guardrail_variable_denies_a_screened_event_with_r5(
+    variable: str, value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(variable, value)
+
+    assert lambda_handler(make_invocation(), None) == R5_DENIAL
+
+
+def test_broken_guardrail_configuration_is_read_again_on_the_next_event(
+    guardrail: Stubber, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(GUARDRAIL_ID)
+    assert lambda_handler(make_invocation(), None) == R5_DENIAL
+    monkeypatch.setenv(GUARDRAIL_ID, "gr1abc2def3")
+    expect(guardrail, "NONE", QUESTION)
+
+    assert lambda_handler(make_invocation(), None)["decision"] == "allow"
+
+
+def test_screened_event_needs_neither_the_ledger_nor_the_limits(
+    guardrail: Stubber, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for variable in ENVIRON:
+        monkeypatch.delenv(variable)
+    expect(guardrail, "NONE", QUESTION)
+
+    assert lambda_handler(make_invocation(), None)["decision"] == "allow"
+    assert [service for service, _ in guardrail.built] == ["bedrock-runtime"]  # type: ignore[attr-defined]  # set by the fixture
+
+
+@pytest.mark.usefixtures("table")
+def test_tool_call_is_decided_without_the_guardrail(
+    guardrail: Stubber, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for variable in GUARDRAIL_ENVIRON:
+        monkeypatch.delenv(variable)
+
+    assert lambda_handler(make_event(), None)["decision"] == "allow"
+    assert [service for service, _ in guardrail.built] == ["dynamodb"]  # type: ignore[attr-defined]  # set by the fixture
+
+
+def test_guardrail_client_is_built_once_per_container_with_its_timeouts(
+    guardrail: Stubber,
+) -> None:
+    for _ in range(3):
+        expect(guardrail, "NONE", QUESTION)
+        assert lambda_handler(make_invocation(), None)["decision"] == "allow"
+
+    assert guardrail.built == [("bedrock-runtime", {"config": hook_handler.CLIENT_CONFIG})]  # type: ignore[attr-defined]  # set by the fixture
+
+
+@pytest.mark.usefixtures("guardrail")
+def test_guardrail_client_that_cannot_be_built_denies_with_r5(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def fail(service: str, **_options: object) -> None:
+        raise RuntimeError(service, INJECTION)
+
+    monkeypatch.setattr(boto3, "client", fail)
+
+    assert lambda_handler(make_invocation(), None) == R5_DENIAL
+    record = logged(capsys)[0]
+    assert record["error"] == "RuntimeError"
+    assert INJECTION not in json.dumps(record)
+
+
+def test_launch_over_the_cap_is_denied_even_when_the_guardrail_passed_the_injection(
+    table: "DynamoDBClient", guardrail: Stubber
+) -> None:
+    # The guardrail is a second layer: missing an injection changes no decision on a tool call.
+    put(table, "DISC", "disc-1", duration_seconds={"N": "600"}, spent_usd={"N": "0.9"})
+    expect(guardrail, "NONE", INJECTION)
+    assert lambda_handler(make_invocation(INJECTION), None)["decision"] == "allow"
+
+    assert lambda_handler(make_event(), None) == {
+        "decision": "deny",
+        "reason": DENIAL_REASONS["R2"],
+    }

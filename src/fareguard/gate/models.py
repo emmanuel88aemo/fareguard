@@ -7,7 +7,8 @@ from typing import Literal
 
 # `evaluate` decides R1 to R5 from a snapshot. R6, at most one pending approval request per
 # disc, can only be held by the atomic write of the ledger store, which is what reports it.
-type RuleId = Literal["R1", "R2", "R3", "R4", "R5", "R6"]
+# R7, text blocked by the content guardrail, is reported by the hook for the events it screens.
+type RuleId = Literal["R1", "R2", "R3", "R4", "R5", "R6", "R7"]
 
 
 class InvalidDecisionError(ValueError):

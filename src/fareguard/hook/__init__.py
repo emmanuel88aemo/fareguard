@@ -1,1 +1,1 @@
-"""The hook the harness invokes before every tool call: an event in, allow or deny out."""
+"""The hook the harness invokes on its lifecycle events: an event in, allow or deny out."""

@@ -5,13 +5,17 @@ import pytest
 from fareguard.gate.models import Limits
 from fareguard.gate.validation import are_well_formed_limits
 from fareguard.handlers.config import (
+    GUARDRAIL_ID,
+    GUARDRAIL_VERSION,
     MAX_USD_PER_DISC,
     MONTHLY_CAP_USD,
     TABLE_NAME,
     USD_PER_MINUTE,
     Config,
     ConfigError,
+    GuardrailConfig,
     load_config,
+    load_guardrail_config,
 )
 
 ENVIRON = {
@@ -127,5 +131,80 @@ def test_invalid_table_name_is_an_error(value: str) -> None:
 def test_error_never_repeats_the_invalid_value(variable: str) -> None:
     with pytest.raises(ConfigError) as caught:
         load_config({**ENVIRON, variable: f"{MARKER} !"})
+
+    assert MARKER not in str(caught.value)
+
+
+GUARDRAIL_ENVIRON = {GUARDRAIL_ID: "gr1abc2def3", GUARDRAIL_VERSION: "3"}
+
+
+def test_guardrail_variables_follow_the_naming_convention() -> None:
+    assert set(GUARDRAIL_ENVIRON) == {"FAREGUARD_GUARDRAIL_ID", "FAREGUARD_GUARDRAIL_VERSION"}
+
+
+def test_guardrail_is_read() -> None:
+    assert load_guardrail_config(GUARDRAIL_ENVIRON) == GuardrailConfig(
+        guardrail_id="gr1abc2def3", guardrail_version="3"
+    )
+
+
+def test_guardrail_is_read_without_the_ledger_or_the_limits() -> None:
+    assert load_guardrail_config({**ENVIRON, **GUARDRAIL_ENVIRON}) == load_guardrail_config(
+        GUARDRAIL_ENVIRON
+    )
+
+
+def test_ledger_and_limits_are_read_without_the_guardrail() -> None:
+    # The tools function receives no guardrail variable.
+    assert load_config({**ENVIRON, **GUARDRAIL_ENVIRON}) == load_config(ENVIRON)
+
+
+@pytest.mark.parametrize("variable", sorted(GUARDRAIL_ENVIRON))
+def test_missing_guardrail_variable_is_an_error_that_names_it(variable: str) -> None:
+    environ = {name: value for name, value in GUARDRAIL_ENVIRON.items() if name != variable}
+
+    with pytest.raises(ConfigError, match=variable):
+        load_guardrail_config(environ)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        " ",
+        "GR1ABC",
+        "gr1-abc",
+        "gr1 abc",
+        "gr1abc\n",
+        "a" * 65,
+        "arn:aws:bedrock:us-east-1:000000000000:guardrail/gr1abc2def3",
+        "guardrail/gr1abc2def3",
+    ],
+)
+def test_invalid_guardrail_id_is_an_error(value: str) -> None:
+    with pytest.raises(ConfigError, match=GUARDRAIL_ID):
+        load_guardrail_config({**GUARDRAIL_ENVIRON, GUARDRAIL_ID: value})
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", " ", "0", "01", "-1", "1.0", "v1", "DRAFT", "draft", "latest", "1\n", " 1", "1" * 9],
+)
+def test_guardrail_version_that_is_not_a_published_one_is_an_error(value: str) -> None:
+    with pytest.raises(ConfigError, match=GUARDRAIL_VERSION):
+        load_guardrail_config({**GUARDRAIL_ENVIRON, GUARDRAIL_VERSION: value})
+
+
+@pytest.mark.parametrize("value", ["1", "3", "12", "99999999"])
+def test_published_guardrail_version_is_accepted(value: str) -> None:
+    config = load_guardrail_config({**GUARDRAIL_ENVIRON, GUARDRAIL_VERSION: value})
+
+    assert config.guardrail_version == value
+
+
+@pytest.mark.parametrize("variable", sorted(GUARDRAIL_ENVIRON))
+def test_guardrail_error_never_repeats_the_invalid_value(variable: str) -> None:
+    with pytest.raises(ConfigError) as caught:
+        load_guardrail_config({**GUARDRAIL_ENVIRON, variable: f"{MARKER} !"})
 
     assert MARKER not in str(caught.value)
