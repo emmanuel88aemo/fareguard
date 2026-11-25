@@ -1,0 +1,9 @@
+# Optional. Copy to terraform.tfvars, which Git ignores, to change a default.
+# region      = "us-east-1"
+# environment = "dev"
+
+# The limits both Lambda functions enforce, in USD. Each is a string holding a
+# positive decimal with at most two decimals.
+# max_usd_per_disc = "1.00" # most that may be spent on one disc
+# monthly_cap_usd  = "5.00" # most that may be spent in one calendar month
+# usd_per_minute   = "0.02" # price of one started minute of a job
