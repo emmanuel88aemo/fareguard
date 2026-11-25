@@ -59,7 +59,10 @@ def launch_job_detailed(
     estimate_usd = estimate_disc(snapshot, disc_id, limits)
     if decision.rule is not None:
         return _refused(decision.rule, decision.reason)
-    if estimate_usd is None:
+    # Unreachable: the gate allows a launch only after it found the disc in this snapshot and
+    # estimated its cost with these limits. The guard stays so that a change to the gate
+    # still fails closed here, and it is excluded from coverage because no test can reach it.
+    if estimate_usd is None:  # pragma: no cover
         return _refused("R5", NO_ESTIMATE_DETAIL)
     result = store.record_launch(Launch(disc_id, approval_ref, estimate_usd, now), limits)
     if result.rule is not None:
