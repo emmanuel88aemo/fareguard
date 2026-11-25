@@ -71,8 +71,10 @@ permission yet. The reasons are in
 [decision record 0005](../docs/decisions/0005-gateway-with-iam-inbound-and-a-role-for-one-function.md).
 
 It has one target, named `fareguard`, which is the tools function, invoked with the
-gateway's own role. A caller sees each tool as `fareguard___<tool>`; the hook and the tools
-handler remove that prefix. The target declares exactly four tools:
+gateway's own role. A caller sees each tool as `fareguard___<tool>`, with three underscores;
+the hook and the tools handler remove that prefix. A real call through the deployed gateway
+confirmed the format: the tools are listed and called under those names. The target declares
+exactly four tools:
 
 | Tool | Arguments |
 |---|---|
@@ -83,6 +85,10 @@ handler remove that prefix. The target declares exactly four tools:
 
 Every argument is a required string. The descriptions say what each tool does and state no
 rule or limit: the rules are enforced by the hook and by the tools, not by a description.
+
+The target is created 20 seconds after the gateway's role and its policy. Without that
+pause a first apply fails, because AgentCore cannot assume a role that IAM has only just
+created.
 
 The function has no resource policy. The gateway and the function are in the same account,
 where the policy of the gateway's role is enough to invoke it.
@@ -153,7 +159,7 @@ After changing `backend.hcl`, run `terraform init -reconfigure -backend-config=b
 terraform plan -out=tfplan
 ```
 
-Read the plan. The first one creates 19 resources and destroys none. It also writes the zip
+Read the plan. The first one creates 20 resources and destroys none. It also writes the zip
 of the functions, so apply the plan from the same checkout that made it.
 
 ## 4. Apply

@@ -12,7 +12,9 @@ resource "aws_bedrockagentcore_gateway" "tools" {
 
 locals {
   # The target name is the prefix of every tool name the harness sees:
-  # "fareguard___<tool>". The hook and the tools handler remove it.
+  # "fareguard___<tool>", with three underscores. A real call through the
+  # deployed gateway confirmed it: the tools are listed and called under
+  # those names. The hook and the tools handler remove the prefix.
   gateway_target_name = "fareguard"
 
   # The tools and their arguments, as fareguard.tools.dispatch defines them.
