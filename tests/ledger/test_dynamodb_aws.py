@@ -36,6 +36,10 @@ UNKNOWN_DISC_LAUNCH = Launch("disc-9", "apr-1", ESTIMATE, AT)
 OVER_THE_DISC_CAP = {"disc-1": Decimal("0.90")}
 OVER_THE_MONTHLY_CAP = {MONTH: Decimal("4.90")}
 BARRIER_TIMEOUT_SECONDS = 30
+RACE_ROUNDS = 5
+# Small enough that the caps still have room after the last round: the launch that loses a
+# race must then be stopped by its approval alone, and R2 would be reported before R4.
+RACE_ESTIMATE = Decimal("0.10")
 
 
 def events(store: LedgerStore) -> tuple[LedgerEvent, ...]:
@@ -185,19 +189,25 @@ def test_every_expression_is_accepted_without_a_reserved_word_error(
 def test_same_approval_launched_from_two_threads_is_recorded_once(
     make_aws_store: MakeStore,
 ) -> None:
-    store = make_aws_store(DISCS, [APPROVAL])
-    # Different times give different events, so only the approval can stop the second launch.
-    launches = [LAUNCH, dataclasses.replace(LAUNCH, at=AT + timedelta(seconds=1))]
+    """Race two launches for one approval, five times, so that some rounds really overlap."""
+    refs = [f"apr-{number}" for number in range(1, RACE_ROUNDS + 1)]
+    approvals = [dataclasses.replace(APPROVAL, ref=ref, approved_usd=RACE_ESTIMATE) for ref in refs]
+    store = make_aws_store(DISCS, approvals)
 
-    outcomes = launch_together(store, launches, LIMITS)
+    for number, ref in enumerate(refs, start=1):
+        first = Launch("disc-1", ref, RACE_ESTIMATE, AT + timedelta(minutes=number))
+        # Different times give different events, so only the approval can stop the second launch.
+        second = dataclasses.replace(first, at=first.at + timedelta(seconds=1))
 
-    assert len(recorded(outcomes)) == 1
-    assert refusal_rules(outcomes) <= {"R4"}
-    snapshot = store.snapshot(AT)
-    assert snapshot.approvals == (dataclasses.replace(APPROVAL, consumed=True),)
-    assert snapshot.disc_spend_usd == {"disc-1": ESTIMATE}
-    assert snapshot.month_spend_usd == ESTIMATE
-    assert [event.type for event in events(store)] == ["job_launched"]
+        outcomes = launch_together(store, [first, second], LIMITS)
+
+        assert len(recorded(outcomes)) == 1
+        assert refusal_rules(outcomes) <= {"R4"}
+        snapshot = store.snapshot(AT)
+        assert [a.consumed for a in snapshot.approvals] == [r <= ref for r in refs]
+        assert snapshot.disc_spend_usd == {"disc-1": RACE_ESTIMATE * number}
+        assert snapshot.month_spend_usd == RACE_ESTIMATE * number
+        assert [event.type for event in events(store)] == ["job_launched"] * number
 
 
 def test_twenty_concurrent_launches_never_push_the_spend_over_the_monthly_cap(
