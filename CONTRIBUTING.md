@@ -38,7 +38,7 @@ Rules checked by CI and by the `commit-msg` hook:
 
 - The summary starts in lower case, has no final period and uses the imperative ("add", not "added").
 - The whole subject is at most 72 characters.
-- The scope is lower case: `gate`, `tools`, `infra`, `stress`, `docs`.
+- The scope is lower case: `gate`, `ledger`, `tools`, `infra`, `stress`, `docs`.
 - A breaking change adds `!` before the colon.
 
 Use the body to explain why, not what. When a commit fixes a rule that failed under
@@ -125,6 +125,7 @@ A task is done when all of these are true:
 ```
 src/fareguard/        Library code: pure decision logic and typed models
   gate/               Rule evaluation used by the hook
+  ledger/             Storage behind the gate: the store contract and its implementations
   tools/              Implementations of the agent's tools
   handlers/           Thin AWS Lambda entry points; no business logic
 infra/                Terraform: everything that exists in AWS

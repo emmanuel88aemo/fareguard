@@ -8,3 +8,4 @@ Copy `0000-template.md` to start a new record.
 | # | Decision | Status |
 |---|---|---|
 | [0001](0001-enforce-rules-outside-the-model.md) | Enforce rules outside the model | Accepted |
+| [0002](0002-single-table-ledger-with-atomic-launch.md) | Single-table ledger with atomic launch | Accepted |
