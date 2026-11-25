@@ -2,6 +2,10 @@
 
 Every variable is required. A missing or invalid value is an error: there is
 no default, because a guessed cap is a cap nobody set.
+
+The ledger and the limits are read by both functions. The guardrail is read by
+the hook function only, with `load_guardrail_config`; the tools function never
+needs it.
 """
 
 import re
@@ -15,6 +19,8 @@ TABLE_NAME = "FAREGUARD_TABLE_NAME"
 MAX_USD_PER_DISC = "FAREGUARD_MAX_USD_PER_DISC"
 MONTHLY_CAP_USD = "FAREGUARD_MONTHLY_CAP_USD"
 USD_PER_MINUTE = "FAREGUARD_USD_PER_MINUTE"
+GUARDRAIL_ID = "FAREGUARD_GUARDRAIL_ID"
+GUARDRAIL_VERSION = "FAREGUARD_GUARDRAIL_VERSION"
 
 _TABLE_NAME_SHAPE = "3 to 255 characters from a-z, A-Z, 0-9, '_', '-' and '.'"
 _TABLE_NAME = re.compile(r"[a-zA-Z0-9_.-]{3,255}")
@@ -22,6 +28,12 @@ _TABLE_NAME = re.compile(r"[a-zA-Z0-9_.-]{3,255}")
 _AMOUNT_SHAPE = "an amount of USD in plain notation, such as 1.00"
 _AMOUNT = re.compile(r"[0-9]{1,9}(\.[0-9]{1,6})?")
 _ZERO = Decimal("0")
+# The id alone, never the ARN of the guardrail: an ARN holds an account id.
+_GUARDRAIL_ID_SHAPE = "the id of a guardrail: 1 to 64 characters from a-z and 0-9"
+_GUARDRAIL_ID = re.compile(r"[a-z0-9]{1,64}")
+# A published version only. The working draft can change under a running function.
+_GUARDRAIL_VERSION_SHAPE = "a published guardrail version: a number from 1 to 99999999"
+_GUARDRAIL_VERSION = re.compile(r"[1-9][0-9]{0,7}")
 
 
 class ConfigError(Exception):
@@ -38,6 +50,37 @@ class Config:
 
     table_name: str
     limits: Limits
+
+
+@dataclass(frozen=True)
+class GuardrailConfig:
+    """The guardrail the hook applies: its id and one published version of it."""
+
+    guardrail_id: str
+    guardrail_version: str
+
+
+def load_guardrail_config(environ: Mapping[str, str]) -> GuardrailConfig:
+    """Return the guardrail named in `environ`.
+
+    Raises:
+        ConfigError: if a variable is missing or its value is invalid.
+    """
+    return GuardrailConfig(
+        guardrail_id=_read_matching(environ, GUARDRAIL_ID, _GUARDRAIL_ID, _GUARDRAIL_ID_SHAPE),
+        guardrail_version=_read_matching(
+            environ, GUARDRAIL_VERSION, _GUARDRAIL_VERSION, _GUARDRAIL_VERSION_SHAPE
+        ),
+    )
+
+
+def _read_matching(
+    environ: Mapping[str, str], variable: str, shape: re.Pattern[str], expected: str
+) -> str:
+    value = environ.get(variable)
+    if value is None or shape.fullmatch(value) is None:
+        raise ConfigError(variable, expected)
+    return value
 
 
 def load_config(environ: Mapping[str, str]) -> Config:
