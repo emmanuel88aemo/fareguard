@@ -47,3 +47,18 @@ output "tools_function_arn" {
   description = "ARN of the tools Lambda function."
   value       = aws_lambda_function.tools.arn
 }
+
+output "gateway_id" {
+  description = "Id of the gateway."
+  value       = aws_bedrockagentcore_gateway.tools.gateway_id
+}
+
+output "gateway_arn" {
+  description = "ARN of the gateway."
+  value       = aws_bedrockagentcore_gateway.tools.gateway_arn
+}
+
+output "gateway_url" {
+  description = "URL of the MCP endpoint of the gateway."
+  value       = aws_bedrockagentcore_gateway.tools.gateway_url
+}
