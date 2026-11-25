@@ -85,10 +85,11 @@ All notable changes to this project are recorded here. The format follows
   authorisation by IAM, and one Lambda target named `fareguard` that declares the four tools
   with their arguments, so a caller sees them as `fareguard___<tool>`. The role of the
   gateway may invoke the tools function and nothing else (decision record 0005). The
-  function needs no resource policy, because the gateway is in the same account. It passes
-  `terraform validate` only: the gateway has not been planned, applied or called in AWS, so
-  the tool name prefix and the place of the tool name in the Lambda context are still to
-  confirm at deploy time.
+  function needs no resource policy, because the gateway is in the same account. The target
+  is created 20 seconds after the role of the gateway, because a first apply failed while
+  AgentCore could not yet assume a role that IAM had just created. The gateway was applied
+  and called in AWS: the tools are listed and called as `fareguard___<tool>`, with three
+  underscores, which confirms the prefix the hook and the tools handler remove.
 
 ### Fixed
 
