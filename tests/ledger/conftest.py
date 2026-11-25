@@ -162,9 +162,21 @@ def _dynamodb_factory(client: "DynamoDBClient", table: str) -> Callable[..., Led
     return make
 
 
-@pytest.fixture(params=["memory", "dynamodb"])
+@pytest.fixture
+def make_aws_store(request: pytest.FixtureRequest) -> Callable[..., LedgerStore]:
+    """Return a factory that seeds the temporary table in real DynamoDB and builds a store on it."""
+    request.getfixturevalue("aws_store")  # empties the table after the test
+    return _dynamodb_factory(
+        request.getfixturevalue("aws_client"), request.getfixturevalue("aws_table")
+    )
+
+
+@pytest.fixture(params=["memory", "dynamodb", pytest.param("aws", marks=pytest.mark.aws)])
 def make_store(request: pytest.FixtureRequest) -> Callable[..., LedgerStore]:
     """Return a factory that builds a seeded store; the contract suite runs once per param."""
     if request.param == "memory":
         return _make_memory_store
+    if request.param == "aws":
+        factory: Callable[..., LedgerStore] = request.getfixturevalue("make_aws_store")
+        return factory
     return _dynamodb_factory(request.getfixturevalue("dynamodb_client"), TABLE)
