@@ -42,6 +42,27 @@ All notable changes to this project are recorded here. The format follows
 - Hook Lambda handler: it builds the DynamoDB client, the store and the limits once per
   container, logs one JSON line per decision and denies with R5 on any error, including a
   missing or invalid environment variable. It is not deployed: no Terraform exists yet.
+- The agent's tools as pure logic in `fareguard.tools`: `read_ledger`, `list_pending`,
+  `request_approval` and `launch_job`, and `dispatch`, which routes a call to one of them.
+  Amounts are strings with two decimals. `launch_job` does not rely on the hook: it takes its
+  own snapshot, asks the gate again and only then records the launch, which the store checks
+  once more atomically. The launch is simulated: the ledger record is the job.
+- `request_approval` estimates the cost from the disc's duration and takes its ref from an
+  injected factory. A second request for a disc that already has one pending is refused with
+  a fixed reason and no rule id, because no numbered rule covers it.
+- A tool result never repeats text from the call, not even a disc id or an approval ref with
+  a valid shape. A refusal carries the same fixed sentence per rule as the hook; an unknown
+  tool is R1, and a missing tool name or malformed arguments are R5. The gate's and the
+  store's own reasons are kept beside the result as `detail`, for the log only.
+- `read_ledger` returns events under the key `untrusted_ledger_events`, because nothing
+  constrains what an event holds. A ledger whose disc, approval or amount is malformed is
+  refused with R5 instead of shown.
+- Tools Lambda handler: it reads the tool name from
+  `context.client_context.custom["bedrockAgentCoreToolName"]`, removes a gateway target prefix
+  with the hook's normalisation and treats the event as the tool's arguments. Both are
+  assumptions to confirm at deploy time. It logs one JSON line per call and answers any error,
+  including a missing or invalid environment variable, with a refusal under R5. It is not
+  deployed: no Terraform exists yet.
 
 ### Fixed
 
