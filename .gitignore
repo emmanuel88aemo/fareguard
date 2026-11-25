@@ -232,3 +232,5 @@ tfplan
 *.tfvars
 *.tfvars.json
 backend.hcl
+# The zip of the Lambda functions, which Terraform builds on every plan.
+infra/main/build/
