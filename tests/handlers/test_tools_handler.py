@@ -17,7 +17,6 @@ from fareguard.handlers.config import (
     USD_PER_MINUTE,
 )
 from fareguard.handlers.tools_handler import TOOL_NAME_KEY, lambda_handler
-from fareguard.tools.approval import PENDING_REQUEST_REASON
 from fareguard.tools.read import UNTRUSTED_EVENTS
 from fareguard.tools.results import reason_for, refusal
 
@@ -204,7 +203,9 @@ def test_request_approval_creates_a_pending_request_with_a_generated_ref(
     }
 
 
-def test_second_request_for_the_same_disc_is_refused(table: "DynamoDBClient") -> None:
+def test_second_request_for_the_same_disc_is_refused_with_r6(
+    table: "DynamoDBClient", capsys: pytest.CaptureFixture[str]
+) -> None:
     first = call("request_approval", {"disc_id": "disc-2"})
 
     second = call("request_approval", {"disc_id": "disc-2"})
@@ -213,9 +214,10 @@ def test_second_request_for_the_same_disc_is_refused(table: "DynamoDBClient") ->
         "requested": False,
         "approval_ref": None,
         "estimate_usd": None,
-        "rule": None,
-        "reason": PENDING_REQUEST_REASON,
+        "rule": "R6",
+        "reason": reason_for("R6"),
     }
+    assert logged(capsys)[1]["rule"] == "R6"
     assert count(table, "APPROVAL") == 2
     assert get(table, "DISC", "disc-2")["pending_approval_ref"] == {"S": first["approval_ref"]}
 

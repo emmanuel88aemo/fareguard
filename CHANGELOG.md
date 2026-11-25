@@ -48,8 +48,10 @@ All notable changes to this project are recorded here. The format follows
   own snapshot, asks the gate again and only then records the launch, which the store checks
   once more atomically. The launch is simulated: the ledger record is the job.
 - `request_approval` estimates the cost from the disc's duration and takes its ref from an
-  injected factory. A second request for a disc that already has one pending is refused with
-  a fixed reason and no rule id, because no numbered rule covers it.
+  injected factory.
+- Rule R6: a disc has at most one pending approval request. The ledger store holds it in its
+  atomic write and `request_approval` reports it; the gate does not evaluate it. A generated
+  ref that is already taken is refused with R5. Every refusal of every tool names a rule.
 - A tool result never repeats text from the call, not even a disc id or an approval ref with
   a valid shape. A refusal carries the same fixed sentence per rule as the hook; an unknown
   tool is R1, and a missing tool name or malformed arguments are R5. The gate's and the
