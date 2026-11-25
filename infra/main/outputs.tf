@@ -22,3 +22,8 @@ output "hook_lambda_role_arn" {
   description = "ARN of the role of the hook Lambda."
   value       = aws_iam_role.hook_lambda.arn
 }
+
+output "tools_lambda_role_arn" {
+  description = "ARN of the role of the tools Lambda."
+  value       = aws_iam_role.tools_lambda.arn
+}
