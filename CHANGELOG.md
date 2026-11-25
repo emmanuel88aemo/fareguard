@@ -81,6 +81,14 @@ All notable changes to this project are recorded here. The format follows
   zip that Terraform builds from `src/` with no dependency in it: `boto3` comes from the
   runtime (decision record 0004). It passes `terraform validate` only: the functions have
   not been planned, applied or invoked in AWS.
+- Terraform for the AgentCore Gateway `fareguard-<env>-gateway`: MCP, with inbound
+  authorisation by IAM, and one Lambda target named `fareguard` that declares the four tools
+  with their arguments, so a caller sees them as `fareguard___<tool>`. The role of the
+  gateway may invoke the tools function and nothing else (decision record 0005). The
+  function needs no resource policy, because the gateway is in the same account. It passes
+  `terraform validate` only: the gateway has not been planned, applied or called in AWS, so
+  the tool name prefix and the place of the tool name in the Lambda context are still to
+  confirm at deploy time.
 
 ### Fixed
 
