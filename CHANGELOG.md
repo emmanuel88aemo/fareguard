@@ -90,6 +90,29 @@ All notable changes to this project are recorded here. The format follows
   AgentCore could not yet assume a role that IAM had just created. The gateway was applied
   and called in AWS: the tools are listed and called as `fareguard___<tool>`, with three
   underscores, which confirms the prefix the hook and the tools handler remove.
+- Rule R7: text blocked by the content guardrail. The hook reports it with one fixed
+  sentence; the gate and the tools do not evaluate it.
+- A port for the guardrail in `fareguard.hook`: the `Guardrail` protocol, `BedrockGuardrail`,
+  which calls `ApplyGuardrail` with the source `INPUT`, and `FakeGuardrail` for tests. The
+  Bedrock implementation raises unless the response names a known action and states that
+  every character was guarded. Its client makes one attempt of at most 8 seconds.
+- The hook answers two more events through `screen`: `before_invocation`, with the text of
+  the request's messages, and `after_tool_call`, with every text of the tool result and its
+  error. Text the guardrail blocks is denied with R7. A context that is missing, truncated
+  or not shaped as documented, a message block that is not text, a guardrail that fails or
+  times out and an event name the hook does not know are denied with R5. The log record
+  names the event and a fixed reason, and never the text. `before_tool_call` is decided as
+  before, without the guardrail.
+- Hook configuration from `FAREGUARD_GUARDRAIL_ID` and `FAREGUARD_GUARDRAIL_VERSION`, both
+  required, with no default; the version must be a published number. The hook reads them
+  when the first text has to be screened, and the tools function does not read them.
+- Terraform for the Bedrock Guardrail `fareguard-<env>-guardrail` and one published version:
+  the prompt attack filter at `HIGH` on input and one denied topic, asking the agent to
+  change, lift or ignore its spending limits or approval rules. The hook role may call
+  `bedrock:ApplyGuardrail` on this guardrail only, and the hook function receives its id and
+  version (decision record 0006). The guardrail is a second layer: no rule depends on it.
+  It passes `terraform validate` only: the guardrail has not been planned, applied or
+  called in AWS, and no harness invokes the hook yet.
 
 ### Fixed
 
