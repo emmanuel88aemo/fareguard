@@ -140,6 +140,17 @@ All notable changes to this project are recorded here. The format follows
   one message under a runtime session id and prints an error exactly as AWS returned it.
   Both have `--dry-run`. Neither has been run: no harness exists yet, and whether a harness
   accepts Amazon Nova 2 Lite is not confirmed.
+- `LedgerStore.decide_approval(ref, approved, at)`, with which a person approves or rejects
+  one pending request. The status of the approval, the removal of `pending_approval_ref`
+  from its disc and an `approval_decided` event are one transaction of three conditional
+  writes, or nothing is written. A decision never consumes the approval: the launch does,
+  so R4 is unchanged, and the disc can be requested again after either decision (R6). An
+  unknown ref, an approval that is not pending or is consumed, and a disc that is not marked
+  with the ref raise `UnknownApprovalError`, `ApprovalNotPendingError` and
+  `ApprovalDiscMismatchError`. Record 0008 supersedes the sentence of record 0002 that kept
+  this out of the store. No tool reaches it, and the role and the command a person will use
+  are not built. It passes against the in-memory store and moto; the run against real
+  DynamoDB has not been made.
 
 ### Fixed
 
