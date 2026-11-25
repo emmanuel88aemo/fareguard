@@ -32,6 +32,7 @@ DENIAL_REASONS: Mapping[RuleId, str] = {
         "this disc and covers the estimated cost"
     ),
     "R5": "R5: the call is malformed, incomplete or could not be evaluated",
+    "R6": "R6: the disc already has an approval request awaiting a decision",
 }
 
 
