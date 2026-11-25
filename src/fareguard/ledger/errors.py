@@ -45,6 +45,30 @@ class UnknownDiscError(LedgerError):
         super().__init__(f"disc {disc_id!r} is not in the ledger")
 
 
+class UnknownApprovalError(LedgerError):
+    """The approval is not in the ledger."""
+
+    def __init__(self, ref: str) -> None:
+        """Record the ref that was not found."""
+        super().__init__(f"approval {ref!r} is not in the ledger")
+
+
+class ApprovalNotPendingError(LedgerError):
+    """The approval was already decided or consumed, so it cannot be decided."""
+
+    def __init__(self, ref: str) -> None:
+        """Record the ref that is no longer awaiting a decision."""
+        super().__init__(f"approval {ref!r} is not pending or is already consumed")
+
+
+class ApprovalDiscMismatchError(LedgerError):
+    """The disc of the approval is not marked with it as its pending request."""
+
+    def __init__(self, ref: str, disc_id: str) -> None:
+        """Record the approval and the disc whose mark is missing or names another request."""
+        super().__init__(f"disc {disc_id!r} is not marked with approval {ref!r} as pending")
+
+
 class LedgerDataError(LedgerError):
     """A stored item does not have the attributes or types the ledger writes."""
 

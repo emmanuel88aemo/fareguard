@@ -1,6 +1,8 @@
 import pytest
 
 from fareguard.ledger.errors import (
+    ApprovalDiscMismatchError,
+    ApprovalNotPendingError,
     ApprovalRefExistsError,
     InvalidLaunchResultError,
     InvalidLedgerInputError,
@@ -8,6 +10,7 @@ from fareguard.ledger.errors import (
     LedgerError,
     LedgerTransactionError,
     PendingApprovalExistsError,
+    UnknownApprovalError,
     UnknownDiscError,
 )
 
@@ -18,6 +21,19 @@ from fareguard.ledger.errors import (
         pytest.param(ApprovalRefExistsError("apr-1"), "'apr-1' already exists", id="ref-exists"),
         pytest.param(PendingApprovalExistsError("disc-1"), "'disc-1' already has", id="pending"),
         pytest.param(UnknownDiscError("disc-9"), "'disc-9' is not in the ledger", id="unknown"),
+        pytest.param(
+            UnknownApprovalError("apr-9"), "approval 'apr-9' is not in the ledger", id="unknown-ref"
+        ),
+        pytest.param(
+            ApprovalNotPendingError("apr-1"),
+            "approval 'apr-1' is not pending or is already consumed",
+            id="not-pending",
+        ),
+        pytest.param(
+            ApprovalDiscMismatchError("apr-1", "disc-1"),
+            "disc 'disc-1' is not marked with approval 'apr-1'",
+            id="disc-mismatch",
+        ),
         pytest.param(
             InvalidLedgerInputError("disc_id", "an identifier"),
             "disc_id is malformed; expected an identifier",
