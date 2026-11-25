@@ -54,3 +54,26 @@ jobs:
         run: mypy
       - name: Pytest
         run: pytest
+
+  terraform:
+    name: Terraform format and validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.17.2"
+          terraform_wrapper: false
+      - name: Format
+        run: terraform fmt -check -recursive
+      # No backend and no credentials: validate reads the configuration only.
+      - name: Validate infra/bootstrap
+        working-directory: infra/bootstrap
+        run: |
+          terraform init -backend=false -input=false -lockfile=readonly
+          terraform validate
+      - name: Validate infra/main
+        working-directory: infra/main
+        run: |
+          terraform init -backend=false -input=false -lockfile=readonly
+          terraform validate
