@@ -21,8 +21,43 @@ No workflow plans or applies this yet: a person runs the commands below.
 | Log group of the tools Lambda, 14 days | `/aws/lambda/fareguard-<env>-tools` |
 | Role of the hook Lambda | `fareguard-<env>-hook-lambda` |
 | Role of the tools Lambda | `fareguard-<env>-tools-lambda` |
+| Hook Lambda function | `fareguard-<env>-hook` |
+| Tools Lambda function | `fareguard-<env>-tools` |
 
-It creates no Lambda function, gateway, guardrail or harness yet.
+It creates no gateway, guardrail or harness yet, so nothing invokes the functions.
+
+### The Lambda functions
+
+| Function | Handler | Timeout |
+|---|---|---|
+| hook | `fareguard.handlers.hook_handler.lambda_handler` | 10 s |
+| tools | `fareguard.handlers.tools_handler.lambda_handler` | 15 s |
+
+Both run on `python3.12` and `arm64` with 256 MB, use the role and the log group listed
+above, and receive the same environment variables:
+
+| Environment variable | Value | Terraform variable | Default |
+|---|---|---|---|
+| `FAREGUARD_TABLE_NAME` | the name of the ledger table | none | |
+| `FAREGUARD_MAX_USD_PER_DISC` | most that may be spent on one disc | `max_usd_per_disc` | `"1.00"` |
+| `FAREGUARD_MONTHLY_CAP_USD` | most that may be spent in one month | `monthly_cap_usd` | `"5.00"` |
+| `FAREGUARD_USD_PER_MINUTE` | price of one started minute | `usd_per_minute` | `"0.02"` |
+
+The three limits are strings that hold a positive decimal with at most two decimals. To
+change one, copy `main/terraform.tfvars.example` to `main/terraform.tfvars`, which Git
+ignores, or pass `-var`.
+
+### How the package is built
+
+Both functions run the same zip. Terraform builds it with the `archive` provider on every
+plan, from the directory `src/`, so the `fareguard` package is at the root of the zip.
+`__pycache__` directories and `*.pyc` files are left out. The zip is written to
+`infra/main/build/fareguard.zip`, which Git ignores, and its hash tells Terraform when the
+code has changed: a plan made after a change under `src/` updates both functions.
+
+The zip holds no dependency. The code needs only `boto3`, and the Python runtime of Lambda
+provides it; see [decision record 0004](../docs/decisions/0004-lambda-package-without-dependencies.md).
+There is no `pip install` and no build script: plan and apply are the whole deployment.
 
 ### What the roles may do
 
@@ -88,7 +123,8 @@ After changing `backend.hcl`, run `terraform init -reconfigure -backend-config=b
 terraform plan -out=tfplan
 ```
 
-Read the plan. The first one creates 11 resources and destroys none.
+Read the plan. The first one creates 13 resources and destroys none. It also writes the zip
+of the functions, so apply the plan from the same checkout that made it.
 
 ## 4. Apply
 
@@ -131,5 +167,6 @@ cd infra/bootstrap && terraform init -backend=false && terraform validate
 cd ../main && terraform init -backend=false && terraform validate
 ```
 
-`validate` checks that the configuration is consistent. It does not check that AWS accepts
-it or that the policies grant what the code needs; only a plan and an apply show that.
+`validate` checks that the configuration is consistent. It does not build the zip, and it
+does not check that AWS accepts the configuration, that the policies grant what the code
+needs or that the functions start; only a plan and an apply show that.

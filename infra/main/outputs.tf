@@ -27,3 +27,23 @@ output "tools_lambda_role_arn" {
   description = "ARN of the role of the tools Lambda."
   value       = aws_iam_role.tools_lambda.arn
 }
+
+output "hook_function_name" {
+  description = "Name of the hook Lambda function."
+  value       = aws_lambda_function.hook.function_name
+}
+
+output "hook_function_arn" {
+  description = "ARN of the hook Lambda function."
+  value       = aws_lambda_function.hook.arn
+}
+
+output "tools_function_name" {
+  description = "Name of the tools Lambda function."
+  value       = aws_lambda_function.tools.function_name
+}
+
+output "tools_function_arn" {
+  description = "ARN of the tools Lambda function."
+  value       = aws_lambda_function.tools.arn
+}
