@@ -68,8 +68,10 @@ class InMemoryLedgerStore:
         self._disc_spend = dict(disc_spend_usd or {})
         self._month_spend = dict(month_spend_usd or {})
         self._events: dict[str, LedgerEvent] = {}
-        self._discs_with_pending_request = {
-            approval.disc_id for approval in self._approvals.values() if approval.status == PENDING
+        self._pending_refs = {
+            approval.disc_id: approval.ref
+            for approval in self._approvals.values()
+            if approval.status == PENDING and approval.disc_id in self._discs
         }
 
     def snapshot(self, at: datetime) -> LedgerSnapshot:
@@ -115,10 +117,10 @@ class InMemoryLedgerStore:
                 raise ApprovalRefExistsError(ref)
             if disc_id not in self._discs:
                 raise UnknownDiscError(disc_id)
-            if disc_id in self._discs_with_pending_request:
+            if disc_id in self._pending_refs:
                 raise PendingApprovalExistsError(disc_id)
             self._approvals[ref] = request.approval()
-            self._discs_with_pending_request.add(disc_id)
+            self._pending_refs[disc_id] = ref
             self._events[event_sort_key(request.event())] = request.event()
 
     def record_launch(self, launch: Launch, limits: Limits) -> LaunchResult:
