@@ -125,6 +125,7 @@ A task is done when all of these are true:
 ```
 src/fareguard/        Library code: pure decision logic and typed models
   gate/               Rule evaluation used by the hook
+  ledger/             Storage behind the gate: the store contract and its implementations
   tools/              Implementations of the agent's tools
   handlers/           Thin AWS Lambda entry points; no business logic
 infra/                Terraform: everything that exists in AWS
