@@ -118,8 +118,10 @@ def test_approved_launch_within_caps_is_allowed(capsys: pytest.CaptureFixture[st
             "hookEventId": "evt-1",
             "sessionId": "session-1",
             "tool": "launch_job",
+            "raw_tool": "launch_job",
             "allowed": True,
             "rule": None,
+            "detail": "allowed",
             "error": None,
         }
     ]
@@ -205,8 +207,10 @@ def test_missing_environment_variable_denies_with_r5(
             "hookEventId": "evt-1",
             "sessionId": "session-1",
             "tool": "read_ledger",
+            "raw_tool": "read_ledger",
             "allowed": False,
             "rule": "R5",
+            "detail": None,
             "error": "ConfigError",
         }
     ]
@@ -307,7 +311,7 @@ def test_log_never_contains_argument_values(tool: str, capsys: pytest.CaptureFix
     lambda_handler(make_event(tool, tool_input), None)
 
     captured = capsys.readouterr()
-    for text in (*tool_input.values(), "approval_ref", "note", "use-1"):
+    for text in (*tool_input.values(), "note", "use-1"):
         assert text not in captured.out
         assert text not in captured.err
 
@@ -326,3 +330,28 @@ def test_reason_never_contains_text_from_the_event(tool: str, tool_input: object
 
     assert answer["reason"] in DENIAL_REASONS.values()
     assert INJECTION not in answer["reason"]
+
+
+@pytest.mark.usefixtures("table")
+def test_detail_and_raw_tool_are_logged_but_never_returned(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    tool = "fareguard-tools___launch_job"
+    tool_input = {"disc_id": "disc-1", "approval_ref": "apr-9"}
+
+    answer = lambda_handler(make_event(tool, tool_input), None)
+
+    record = logged(capsys)[0]
+    assert record["raw_tool"] == tool
+    assert record["tool"] == "launch_job"
+    assert record["detail"] == "no approval with ref 'apr-9' exists"
+    assert answer == {"decision": "deny", "reason": DENIAL_REASONS["R4"]}
+    assert str(record["detail"]) not in answer["reason"]
+    assert tool not in answer["reason"]
+
+
+@pytest.mark.usefixtures("table")
+def test_raw_tool_is_logged_cut_to_128_characters(capsys: pytest.CaptureFixture[str]) -> None:
+    lambda_handler(make_event("x" * 500, {}), None)
+
+    assert logged(capsys)[0]["raw_tool"] == "x" * 128

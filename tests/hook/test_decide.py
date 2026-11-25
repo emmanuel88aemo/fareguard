@@ -6,7 +6,8 @@ from decimal import Decimal
 
 import pytest
 
-from fareguard.gate.models import Approval, Disc, LedgerSnapshot, Limits
+from fareguard.gate.evaluate import evaluate
+from fareguard.gate.models import Approval, Disc, LedgerSnapshot, Limits, ToolCall
 from fareguard.hook.decide import (
     ALLOWED_REASON,
     DENIAL_REASONS,
@@ -79,8 +80,10 @@ def test_approved_launch_within_caps_is_allowed() -> None:
         "hookEventId": "evt-1",
         "sessionId": "session-1",
         "tool": "launch_job",
+        "raw_tool": "launch_job",
         "allowed": True,
         "rule": None,
+        "detail": "allowed",
         "error": None,
     }
 
@@ -282,15 +285,140 @@ def test_every_reason_is_fixed_text_within_the_length_the_harness_accepts() -> N
         assert len(reason) <= MAX_REASON_LENGTH
 
 
+RECORD_FIELDS = {
+    "hookEventId",
+    "sessionId",
+    "tool",
+    "raw_tool",
+    "allowed",
+    "rule",
+    "detail",
+    "error",
+}
+
+
 def test_record_never_contains_argument_values() -> None:
     tool_input = {"disc_id": "disc-secret-7", "approval_ref": "apr-secret-9", "note": INJECTION}
 
     result = decide(make_event(tool_input=tool_input), make_store(), LIMITS, NOW)
 
     logged = json.dumps(result.record)
-    assert set(result.record) == {"hookEventId", "sessionId", "tool", "allowed", "rule", "error"}
-    for value in (*tool_input.values(), "note", "approval_ref", "use-1"):
+    assert set(result.record) == RECORD_FIELDS
+    for value in (*tool_input.values(), "note", "use-1"):
         assert value not in logged
+
+
+@pytest.mark.parametrize("argument", ["disc_id", "approval_ref"])
+def test_record_never_contains_an_argument_that_is_not_an_identifier(argument: str) -> None:
+    tool_input = {**LAUNCH_INPUT, argument: INJECTION}
+
+    result = decide(make_event(tool_input=tool_input), make_store(), LIMITS, NOW)
+
+    assert_denied(result, "R5")
+    assert INJECTION not in json.dumps(result.record)
+
+
+def test_detail_is_the_reason_of_the_gate() -> None:
+    call = ToolCall("launch_job", LAUNCH_INPUT)
+    store = make_store(disc_spend_usd={"disc-1": Decimal("0.90")})
+
+    result = decide(make_event(), store, LIMITS, NOW)
+
+    assert result.record["detail"] == evaluate(call, store.snapshot(NOW), LIMITS).reason
+    assert "0.90 USD already spent" in str(result.record["detail"])
+
+
+def test_detail_may_quote_an_argument_that_has_the_shape_of_an_identifier() -> None:
+    tool_input = {"disc_id": IDENTIFIER_INJECTION, "approval_ref": "apr-1"}
+
+    result = decide(make_event(tool_input=tool_input), make_store(), LIMITS, NOW)
+
+    assert_denied(result, "R5")
+    assert IDENTIFIER_INJECTION in str(result.record["detail"])
+    assert IDENTIFIER_INJECTION not in result.answer["reason"]
+
+
+def test_detail_is_empty_when_the_gate_was_not_reached() -> None:
+    unusable = decide(make_event(tool_input=None), make_store(), LIMITS, NOW)
+    failed = decide(make_event(), BrokenStore(), LIMITS, NOW)
+
+    assert unusable.record["detail"] is None
+    assert failed.record["detail"] is None
+
+
+@pytest.mark.parametrize(
+    "tool", ["launch_job", "fareguard-tools___launch_job", "Some.Target___Launch_Job", INJECTION]
+)
+def test_raw_tool_is_the_tool_name_exactly_as_it_arrived(tool: str) -> None:
+    result = decide(make_event(tool), make_store(), LIMITS, NOW)
+
+    assert result.record["raw_tool"] == tool
+
+
+def test_raw_tool_is_cut_to_128_characters() -> None:
+    tool = "t" * 200 + "___launch_job"
+
+    result = decide(make_event(tool), make_store(), LIMITS, NOW)
+
+    assert result.record["raw_tool"] == "t" * 128
+    assert result.record["tool"] == "launch_job"
+    assert result.answer["decision"] == "allow"
+
+
+def test_raw_tool_is_recorded_when_the_rest_of_the_event_is_unusable() -> None:
+    truncated = make_event("target___launch_job", {"truncated": True, "preview": "{"})
+    other_type = make_event("target___launch_job", event="after_tool_call")
+
+    for event in (truncated, other_type):
+        result = decide(event, make_store(), LIMITS, NOW)
+        assert_denied(result, "R5")
+        assert result.record["raw_tool"] == "target___launch_job"
+        assert result.record["tool"] is None
+
+
+@pytest.mark.parametrize("tool", [None, 7, ["launch_job"], {"truncated": True, "preview": "la"}])
+def test_raw_tool_that_is_not_text_is_left_out_of_the_record(tool: object) -> None:
+    result = decide(make_event(tool), make_store(), LIMITS, NOW)
+
+    assert_denied(result, "R5")
+    assert result.record["raw_tool"] is None
+
+
+@pytest.mark.parametrize(
+    ("tool", "tool_input"),
+    [
+        pytest.param("target___delete_ledger", {}, id="R1"),
+        pytest.param("target___launch_job", LAUNCH_INPUT, id="R2"),
+        pytest.param(
+            "target___launch_job", {"disc_id": "disc-1", "approval_ref": "apr-9"}, id="R4"
+        ),
+        pytest.param("target___read_ledger", {"all": True}, id="R5 arguments"),
+        pytest.param(
+            "target___request_approval", {"disc_id": IDENTIFIER_INJECTION}, id="R5 unknown disc"
+        ),
+        pytest.param(INJECTION, {}, id="injection as tool name"),
+    ],
+)
+def test_detail_and_raw_tool_never_appear_in_the_answer(tool: str, tool_input: object) -> None:
+    store = make_store(disc_spend_usd={"disc-1": Decimal("0.90")})
+
+    result = decide(make_event(tool, tool_input), store, LIMITS, NOW)
+
+    detail, raw_tool = result.record["detail"], result.record["raw_tool"]
+    assert detail
+    assert raw_tool == tool
+    assert set(result.answer) == {"decision", "reason"}
+    assert result.answer["decision"] == "deny"
+    assert result.answer["reason"] in DENIAL_REASONS.values()
+    assert detail not in result.answer["reason"]
+    assert raw_tool not in result.answer["reason"]
+    assert detail not in DENIAL_REASONS.values()
+
+
+def test_answer_of_an_allowed_call_holds_only_the_fixed_reason() -> None:
+    result = decide(make_event("target___launch_job"), make_store(), LIMITS, NOW)
+
+    assert result.answer == {"decision": "allow", "reason": ALLOWED_REASON}
 
 
 def test_identifiers_that_are_not_text_are_left_out_of_the_record() -> None:
@@ -351,8 +479,10 @@ def test_undecided_denies_with_r5_and_names_the_error() -> None:
         "hookEventId": "evt-1",
         "sessionId": "session-1",
         "tool": "launch_job",
+        "raw_tool": "launch_job",
         "allowed": False,
         "rule": "R5",
+        "detail": None,
         "error": "KeyError",
     }
 

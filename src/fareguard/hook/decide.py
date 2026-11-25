@@ -3,7 +3,8 @@
 The harness invokes the hook before every tool call. The model cannot call it
 or influence it, and the reason it returns goes back to the model. A reason is
 therefore a fixed sentence chosen by the rule that denied: it never repeats
-text from the event, and the log record never holds the arguments of the call.
+text from the event. What the model no longer sees is kept in the log record:
+the gate's own reason and the tool name as it arrived.
 """
 
 import contextlib
@@ -18,6 +19,7 @@ from fareguard.ledger.store import LedgerStore
 
 BEFORE_TOOL_CALL = "before_tool_call"
 MAX_REASON_LENGTH = 1024
+MAX_RAW_TOOL_LENGTH = 128
 TARGET_SEPARATOR = "___"
 
 ALLOWED_REASON = "allowed"
@@ -41,17 +43,24 @@ class HookAnswer(TypedDict):
 
 
 class HookRecord(TypedDict):
-    """One decision as it is logged. It never holds the arguments of the call.
+    """One decision as it is logged. It is never returned to the harness.
 
-    `error` is the class name of an exception that forced the denial, or None.
+    `detail` is the gate's own reason, or None when the gate was not reached.
+    It may quote a disc id or an approval ref of the call, but only one with
+    the strict shape of an identifier; no other argument text is recorded.
+    `raw_tool` is the tool name exactly as it arrived, cut to
+    MAX_RAW_TOOL_LENGTH characters. `error` is the class name of an exception
+    that forced the denial, or None.
     """
 
     # The identifiers keep the spelling the harness uses, so a log line matches its event.
     hookEventId: str | None
     sessionId: str | None
     tool: str | None
+    raw_tool: str | None
     allowed: bool
     rule: RuleId | None
+    detail: str | None
     error: str | None
 
 
@@ -69,10 +78,20 @@ class _Request:
 
     hook_event_id: str | None = None
     session_id: str | None = None
+    raw_tool: str | None = None
     call: ToolCall | None = None
 
 
+@dataclass(frozen=True)
+class _Outcome:
+    """The rule that denies, or None, with the gate's reason when the gate was reached."""
+
+    rule: RuleId | None
+    detail: str | None = None
+
+
 _UNREAD = _Request()
+_UNEVALUATED = _Outcome("R5")
 
 
 def normalise_tool_name(name: str) -> str:
@@ -93,11 +112,11 @@ def decide(event: object, store: LedgerStore, limits: Limits, now: datetime) -> 
     request = _UNREAD
     try:
         request = _read_request(event)
-        rule = _evaluate(request, store, limits, now)
+        decision = _evaluate(request, store, limits, now)
     # decide is the last step before the harness: whatever fails here must deny, not propagate.
     except Exception as error:  # noqa: BLE001
-        return _result(request, "R5", type(error).__name__)
-    return _result(request, rule)
+        return _result(request, _UNEVALUATED, type(error).__name__)
+    return _result(request, decision)
 
 
 def undecided(event: object, error: Exception) -> HookResult:
@@ -109,16 +128,15 @@ def undecided(event: object, error: Exception) -> HookResult:
     # The denial must be returned even if the event cannot be read at all.
     with contextlib.suppress(Exception):
         request = _read_request(event)
-    return _result(request, "R5", type(error).__name__)
+    return _result(request, _UNEVALUATED, type(error).__name__)
 
 
-def _evaluate(
-    request: _Request, store: LedgerStore, limits: Limits, now: datetime
-) -> RuleId | None:
-    """Return the rule that denies the request, or None when it is allowed."""
+def _evaluate(request: _Request, store: LedgerStore, limits: Limits, now: datetime) -> _Outcome:
+    """Return the gate's outcome for the request, or the R5 denial of an unusable event."""
     if request.call is None:
-        return "R5"
-    return evaluate(request.call, store.snapshot(now), limits).rule
+        return _UNEVALUATED
+    decision = evaluate(request.call, store.snapshot(now), limits)
+    return _Outcome(decision.rule, decision.reason)
 
 
 def _read_request(event: object) -> _Request:
@@ -127,8 +145,16 @@ def _read_request(event: object) -> _Request:
     return _Request(
         hook_event_id=_text(event.get("hookEventId")),
         session_id=_text(event.get("sessionId")),
+        raw_tool=_read_raw_tool(event),
         call=_read_call(event),
     )
+
+
+def _read_raw_tool(event: Mapping[object, object]) -> str | None:
+    """Return the tool name as it arrived, cut short, whatever else is wrong with the event."""
+    context = event.get("context")
+    name = context.get("toolName") if isinstance(context, Mapping) else None
+    return name[:MAX_RAW_TOOL_LENGTH] if isinstance(name, str) else None
 
 
 def _read_call(event: Mapping[object, object]) -> ToolCall | None:
@@ -152,7 +178,8 @@ def _text(value: object) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _result(request: _Request, rule: RuleId | None, error: str | None = None) -> HookResult:
+def _result(request: _Request, outcome: _Outcome, error: str | None = None) -> HookResult:
+    rule = outcome.rule
     answer: HookAnswer = (
         {"decision": "allow", "reason": ALLOWED_REASON}
         if rule is None
@@ -162,8 +189,10 @@ def _result(request: _Request, rule: RuleId | None, error: str | None = None) ->
         "hookEventId": request.hook_event_id,
         "sessionId": request.session_id,
         "tool": None if request.call is None else request.call.name,
+        "raw_tool": request.raw_tool,
         "allowed": rule is None,
         "rule": rule,
+        "detail": outcome.detail,
         "error": error,
     }
     return HookResult(answer, record)

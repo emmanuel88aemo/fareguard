@@ -25,13 +25,17 @@ All notable changes to this project are recorded here. The format follows
   conditions are reported. The one failure showed that DynamoDB drops the trailing zeros of a
   number, so an amount written as 0.20 was read back as 0.2; moto keeps them and had hidden it.
 - Hook decision logic for the AgentCore harness: `decide` answers a `before_tool_call` event
-  with allow or deny from the gate's outcome and returns a record for logging that never holds
-  the arguments. Any other event type and a missing, truncated or malformed tool input are
-  denied with R5, as is a call whose evaluation fails. A tool name may carry a gateway target
-  prefix, `<target>___<tool>`; that format is an assumption to confirm at deploy time.
+  with allow or deny from the gate's outcome and returns a record for logging. Any other event
+  type and a missing, truncated or malformed tool input are denied with R5, as is a call whose
+  evaluation fails. A tool name may carry a gateway target prefix, `<target>___<tool>`; that
+  format is an assumption to confirm at deploy time.
 - The reason returned by the hook is a fixed sentence per rule that starts with the rule id.
   It contains no text from the event, so it is shorter than the gate's own reason: it names
   no disc, approval or amount.
+- The hook's log record keeps what the agent no longer sees: `detail`, the gate's own reason,
+  and `raw_tool`, the tool name as it arrived, cut to 128 characters. Neither is returned to
+  the harness. `detail` may quote a disc id or an approval ref that has the strict shape of an
+  identifier; no other argument text is logged.
 - Lambda configuration from the environment variables `FAREGUARD_TABLE_NAME`,
   `FAREGUARD_MAX_USD_PER_DISC`, `FAREGUARD_MONTHLY_CAP_USD` and `FAREGUARD_USD_PER_MINUTE`.
   All are required and none has a default.
