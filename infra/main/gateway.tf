@@ -91,6 +91,7 @@ resource "aws_bedrockagentcore_gateway_target" "fareguard" {
     }
   }
 
-  # The role must be able to invoke the function before the target exists.
-  depends_on = [aws_iam_role_policy.gateway]
+  # AgentCore must be able to assume the role, and the role to invoke the
+  # function, before the target is created; see the pause in iam_gateway.tf.
+  depends_on = [time_sleep.gateway_role_propagation]
 }

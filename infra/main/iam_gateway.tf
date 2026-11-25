@@ -57,3 +57,17 @@ resource "aws_iam_role_policy_attachments_exclusive" "gateway" {
   role_name   = aws_iam_role.gateway.name
   policy_arns = []
 }
+
+# IAM is eventually consistent: for some seconds after the role, its trust and
+# its policy are created, AgentCore cannot assume the role yet. A target
+# created in that window fails with "Gateway service is not authorized to
+# perform AssumeRole on Gateway role", and only a second apply succeeds. The
+# target waits for this pause instead, so a first apply from scratch works.
+resource "time_sleep" "gateway_role_propagation" {
+  create_duration = "20s"
+
+  depends_on = [
+    aws_iam_role.gateway,
+    aws_iam_role_policy.gateway,
+  ]
+}
