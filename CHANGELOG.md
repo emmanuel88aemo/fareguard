@@ -149,8 +149,10 @@ All notable changes to this project are recorded here. The format follows
   with the ref raise `UnknownApprovalError`, `ApprovalNotPendingError` and
   `ApprovalDiscMismatchError`. Record 0008 supersedes the sentence of record 0002 that kept
   this out of the store. No tool reaches it, and the role and the command a person will use
-  are not built. It passes against the in-memory store and moto; the run against real
-  DynamoDB has not been made.
+  are not built. It passes against the in-memory store, moto and real DynamoDB: the `aws`
+  suite passed in three consecutive runs of 106 tests each. Two colliding transactions can
+  both be cancelled there with `TransactionConflict`, so the race tests assert that at most
+  one decision or launch wins, never two, and that the ledger is unchanged when none does.
 
 ### Fixed
 
