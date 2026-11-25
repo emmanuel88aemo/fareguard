@@ -77,6 +77,10 @@ testing, name the stress case in the body (for example `Stress case: A5`).
 | Environment variable | `FAREGUARD_<NAME>` | `FAREGUARD_MONTHLY_CAP_USD` |
 | Decision record | `docs/decisions/NNNN-<title>.md` | `0001-enforce-rules-outside-the-model.md` |
 
+The S3 bucket of the Terraform state is the one exception to `fareguard-<env>-<component>`:
+bucket names are global, so its name is chosen per account and only has to start with
+`fareguard-`.
+
 Every AWS resource carries the tags `Project = fareguard`, `Environment` and `ManagedBy = terraform`.
 Rule and stress-case identifiers are never renumbered: the write-up, the tests and the code refer to them.
 
