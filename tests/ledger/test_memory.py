@@ -5,10 +5,10 @@ from decimal import Decimal
 from fareguard.gate.models import Approval, Disc, Limits
 from fareguard.ledger.errors import LedgerError
 from fareguard.ledger.memory import InMemoryLedgerStore
-from fareguard.ledger.store import Launch, LaunchResult, LedgerStore
+from fareguard.ledger.store import Launch, LaunchResult, LedgerStore, month_of
 
 AT = datetime(2026, 11, 25, 10, 0, tzinfo=UTC)
-MONTH = "2026-11"
+MONTH = month_of(AT)
 LIMITS = Limits()
 ESTIMATE = Decimal("0.20")
 DISCS = [Disc(f"disc-{number}", 600) for number in range(1, 9)]
@@ -37,7 +37,7 @@ def test_only_one_of_many_concurrent_launches_consumes_an_approval() -> None:
 
     assert sum(result.launched for result in results) == 1
     assert {result.rule for result in results if not result.launched} == {"R4"}
-    assert store.snapshot(MONTH).month_spend_usd == ESTIMATE
+    assert store.snapshot(AT).month_spend_usd == ESTIMATE
     assert len(store.recent_events(100)) == 1
 
 
@@ -55,7 +55,7 @@ def test_concurrent_launches_never_exceed_the_monthly_cap() -> None:
 
     assert sum(result.launched for result in results) == 2
     assert {result.rule for result in results if not result.launched} == {"R3"}
-    assert store.snapshot(MONTH).month_spend_usd == Decimal("4.90")
+    assert store.snapshot(AT).month_spend_usd == Decimal("4.90")
 
 
 def test_only_one_of_many_concurrent_requests_for_a_disc_is_recorded() -> None:
@@ -78,10 +78,10 @@ def test_only_one_of_many_concurrent_requests_for_a_disc_is_recorded() -> None:
 def test_changing_a_returned_snapshot_does_not_change_the_store() -> None:
     seed = {"disc-1": Decimal("0.10")}
     store = InMemoryLedgerStore(DISCS, [], seed)
-    snapshot = store.snapshot(MONTH)
+    snapshot = store.snapshot(AT)
 
     assert isinstance(snapshot.disc_spend_usd, dict)
     snapshot.disc_spend_usd["disc-1"] = Decimal("0.00")
     seed["disc-1"] = Decimal("9.99")
 
-    assert store.snapshot(MONTH).disc_spend_usd == {"disc-1": Decimal("0.10")}
+    assert store.snapshot(AT).disc_spend_usd == {"disc-1": Decimal("0.10")}

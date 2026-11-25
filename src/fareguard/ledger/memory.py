@@ -23,10 +23,10 @@ from fareguard.ledger.store import (
     LaunchResult,
     LedgerEvent,
     event_sort_key,
+    month_of,
     refuse,
     require_event_limit,
     require_limits,
-    require_month,
 )
 
 _ZERO = Decimal("0")
@@ -53,9 +53,9 @@ class InMemoryLedgerStore:
             approval.disc_id for approval in self._approvals.values() if approval.status == PENDING
         }
 
-    def snapshot(self, month: str) -> LedgerSnapshot:
-        """Return discs, approvals and spend as the gate reads them, for `month`."""
-        require_month(month)
+    def snapshot(self, at: datetime) -> LedgerSnapshot:
+        """Return discs, approvals and spend as the gate reads them, for the UTC month of `at`."""
+        month = month_of(at)
         with self._lock:
             return LedgerSnapshot(
                 discs=tuple(self._discs[disc_id] for disc_id in sorted(self._discs)),

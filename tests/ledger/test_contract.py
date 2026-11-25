@@ -2,7 +2,7 @@
 
 import dataclasses
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -17,13 +17,13 @@ from fareguard.ledger.errors import (
     PendingApprovalExistsError,
     UnknownDiscError,
 )
-from fareguard.ledger.store import Launch, LedgerEvent, LedgerStore
+from fareguard.ledger.store import Launch, LedgerEvent, LedgerStore, month_of
 
 type MakeStore = Callable[..., LedgerStore]
 type State = tuple[LedgerSnapshot, tuple[LedgerEvent, ...]]
 
 AT = datetime(2026, 11, 25, 10, 0, tzinfo=UTC)
-MONTH = "2026-11"
+MONTH = month_of(AT)
 LIMITS = Limits()
 ESTIMATE = Decimal("0.20")
 # Ten minutes at the default rate: an estimate of 0.20 USD.
@@ -40,7 +40,7 @@ def approval(**changes: object) -> Approval:
 
 def state(store: LedgerStore) -> State:
     """Everything observable through the store: the snapshot and the whole event log."""
-    return store.snapshot(MONTH), store.recent_events(100)
+    return store.snapshot(AT), store.recent_events(100)
 
 
 def test_recorded_launch_changes_all_four_items(make_store: MakeStore) -> None:
@@ -136,7 +136,7 @@ def test_estimate_over_a_monthly_cap_with_no_spend_yet_is_refused(make_store: Ma
     result = store.record_launch(LAUNCH, Limits(monthly_cap_usd=Decimal("0.19")))
 
     assert result.rule == "R3"
-    assert store.snapshot(MONTH).month_spend_usd == Decimal("0")
+    assert store.snapshot(AT).month_spend_usd == Decimal("0")
 
 
 def test_second_launch_with_the_same_approval_is_refused_A5(make_store: MakeStore) -> None:  # noqa: N802  # stress case id
@@ -161,7 +161,7 @@ def test_two_launches_that_together_exceed_the_disc_cap_A4(make_store: MakeStore
 
     assert first.launched is True
     assert second.rule == "R2"
-    snapshot = store.snapshot(MONTH)
+    snapshot = store.snapshot(AT)
     assert snapshot.disc_spend_usd == {"disc-1": part}
     assert [a.consumed for a in snapshot.approvals] == [True, False]
 
@@ -175,7 +175,7 @@ def test_two_launches_that_together_exceed_the_monthly_cap(make_store: MakeStore
 
     assert first.launched is True
     assert second.rule == "R3"
-    assert store.snapshot(MONTH).month_spend_usd == Decimal("4.90")
+    assert store.snapshot(AT).month_spend_usd == Decimal("4.90")
 
 
 @pytest.mark.parametrize(
@@ -213,8 +213,8 @@ def test_launch_counts_against_the_utc_month_of_its_time(make_store: MakeStore) 
     result = store.record_launch(dataclasses.replace(LAUNCH, at=december), LIMITS)
 
     assert result.launched is True
-    assert store.snapshot("2026-12").month_spend_usd == ESTIMATE
-    assert store.snapshot(MONTH).month_spend_usd == Decimal("5.00")
+    assert store.snapshot(december).month_spend_usd == ESTIMATE
+    assert store.snapshot(AT).month_spend_usd == Decimal("5.00")
 
 
 def test_launch_with_malformed_limits_is_rejected_and_changes_nothing(
@@ -236,7 +236,7 @@ def test_approval_request_is_pending_and_leaves_an_event(make_store: MakeStore) 
 
     pending = approval(status="pending")
     assert store.pending_approvals() == (pending,)
-    assert store.snapshot(MONTH).approvals == (pending,)
+    assert store.snapshot(AT).approvals == (pending,)
     (event,) = store.recent_events(10)
     assert event.type == "approval_requested"
     assert event.at == AT
@@ -318,7 +318,7 @@ def test_malformed_approval_request_is_rejected_and_changes_nothing(
     with pytest.raises(InvalidLedgerInputError):
         store.create_approval_request(disc_id, approved_usd, ref, at)
 
-    assert state(store) == (store.snapshot(MONTH), ())
+    assert state(store) == (store.snapshot(AT), ())
     assert store.pending_approvals() == ()
 
 
@@ -345,13 +345,22 @@ def test_recent_events_reject_a_limit_below_one(make_store: MakeStore, limit: in
         make_store().recent_events(limit)
 
 
-def test_snapshot_rejects_a_malformed_month(make_store: MakeStore) -> None:
-    with pytest.raises(InvalidLedgerInputError, match="month is malformed"):
-        make_store().snapshot("2026-13")
+def test_snapshot_rejects_a_naive_time(make_store: MakeStore) -> None:
+    with pytest.raises(InvalidLedgerInputError, match="at is malformed"):
+        make_store().snapshot(AT.replace(tzinfo=None))
+
+
+def test_snapshot_reads_the_spend_of_the_utc_month_of_its_time(make_store: MakeStore) -> None:
+    store = make_store(DISCS, [], {}, {"2026-11": Decimal("1.25"), "2026-12": Decimal("0.40")})
+    local_december = datetime(2026, 12, 1, 0, 30, tzinfo=timezone(timedelta(hours=2)))
+    local_november = datetime(2026, 11, 30, 20, 0, tzinfo=timezone(timedelta(hours=-6)))
+
+    assert store.snapshot(local_december).month_spend_usd == Decimal("1.25")
+    assert store.snapshot(local_november).month_spend_usd == Decimal("0.40")
 
 
 def test_empty_ledger_gives_an_empty_well_formed_snapshot(make_store: MakeStore) -> None:
-    snapshot = make_store().snapshot(MONTH)
+    snapshot = make_store().snapshot(AT)
 
     assert snapshot == LedgerSnapshot((), (), Decimal("0"), {})
     assert is_well_formed_snapshot(snapshot)
@@ -361,7 +370,7 @@ def test_snapshot_round_trips_what_was_seeded(make_store: MakeStore) -> None:
     approvals = [approval(ref="apr-2", status="rejected"), APPROVAL]
     store = make_store(DISCS, approvals, {"disc-2": Decimal("0.40")}, {MONTH: Decimal("1.25")})
 
-    snapshot = store.snapshot(MONTH)
+    snapshot = store.snapshot(AT)
 
     assert snapshot == LedgerSnapshot(
         discs=DISCS,
@@ -370,7 +379,7 @@ def test_snapshot_round_trips_what_was_seeded(make_store: MakeStore) -> None:
         disc_spend_usd={"disc-2": Decimal("0.40")},
     )
     assert is_well_formed_snapshot(snapshot)
-    assert store.snapshot("2026-10").month_spend_usd == Decimal("0")
+    assert store.snapshot(AT - timedelta(days=31)).month_spend_usd == Decimal("0")
 
 
 def test_snapshot_stays_well_formed_after_writes(make_store: MakeStore) -> None:
@@ -378,7 +387,7 @@ def test_snapshot_stays_well_formed_after_writes(make_store: MakeStore) -> None:
     store.record_launch(LAUNCH, LIMITS)
     store.create_approval_request("disc-2", ESTIMATE, "apr-2", AT)
 
-    assert is_well_formed_snapshot(store.snapshot(MONTH))
+    assert is_well_formed_snapshot(store.snapshot(AT))
 
 
 def test_amounts_stay_decimal_end_to_end(make_store: MakeStore) -> None:
@@ -433,7 +442,7 @@ def test_gate_and_store_agree_on_the_same_state(
     call = ToolCall("launch_job", {"disc_id": disc_id, "approval_ref": "apr-1"})
     estimate = estimate_cost(DISC.duration_seconds, LIMITS.usd_per_minute)
 
-    decision = evaluate(call, store.snapshot(MONTH), LIMITS)
+    decision = evaluate(call, store.snapshot(AT), LIMITS)
     result = store.record_launch(Launch(disc_id, "apr-1", estimate, AT), LIMITS)
 
     assert (result.launched, result.rule) == (decision.allowed, decision.rule)

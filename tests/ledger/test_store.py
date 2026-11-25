@@ -17,7 +17,6 @@ from fareguard.ledger.store import (
     refuse,
     require_event_limit,
     require_limits,
-    require_month,
 )
 
 AT = datetime(2026, 11, 25, 10, 0, tzinfo=UTC)
@@ -211,27 +210,18 @@ def test_refused_launch_without_a_rule_is_rejected() -> None:
         LaunchResult(launched=False, rule=None, reason="refused")
 
 
-@pytest.mark.parametrize("month", ["2026-11", "2026-01", "2026-12", "0001-01"])
-def test_year_and_month_is_a_valid_month(month: str) -> None:
-    require_month(month)
-
-
 @pytest.mark.parametrize(
-    "month",
+    "at",
     [
-        pytest.param("2026-13", id="month-13"),
-        pytest.param("2026-00", id="month-00"),
-        pytest.param("2026-1", id="one-digit"),
-        pytest.param("26-11", id="short-year"),
-        pytest.param("2026-11-25", id="full-date"),
-        pytest.param("2026-11\n", id="trailing-newline"),
-        pytest.param(202611, id="int"),
+        pytest.param(NAIVE, id="naive"),
+        pytest.param("2026-11", id="month-string"),
+        pytest.param("2026-11-25T10:00:00+00:00", id="iso-string"),
         pytest.param(None, id="none"),
     ],
 )
-def test_anything_else_is_not_a_valid_month(month: object) -> None:
-    with pytest.raises(InvalidLedgerInputError, match="month is malformed"):
-        require_month(month)
+def test_month_of_anything_but_an_aware_datetime_is_rejected(at: Any) -> None:  # noqa: ANN401  # wrong types are the input under test
+    with pytest.raises(InvalidLedgerInputError, match="at is malformed"):
+        month_of(at)
 
 
 @pytest.mark.parametrize(

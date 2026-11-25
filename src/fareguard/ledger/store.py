@@ -9,11 +9,11 @@ A store has no operation that edits or deletes an event, decides an approval
 or changes a limit. A person decides approvals through a separate channel.
 Every change of state leaves an event in the same atomic write.
 
-The monthly cap follows the UTC calendar month: `month_of` is the only place
-where a month is derived from a time.
+The monthly cap follows the UTC calendar month. Callers pass times, never
+months: `month_of` is the only place where a month is derived, for reads and
+for writes alike.
 """
 
-import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -35,7 +35,6 @@ JOB_LAUNCHED = "job_launched"
 APPROVAL_REQUESTED = "approval_requested"
 PENDING = "pending"
 APPROVED = "approved"
-_MONTH = re.compile(r"\d{4}-(0[1-9]|1[0-2])")
 _ZERO = Decimal("0")
 
 type _Detail = Mapping[str, str | Decimal]
@@ -112,19 +111,18 @@ def _require_instant(at: object) -> None:
 
 
 def month_of(at: datetime) -> str:
-    """Return the UTC calendar month of `at` as "YYYY-MM", the month a launch counts against."""
+    """Return the UTC calendar month of `at` as "YYYY-MM", the month the monthly cap counts.
+
+    Raises:
+        InvalidLedgerInputError: if `at` is not a timezone-aware datetime.
+    """
+    _require_instant(at)
     return at.astimezone(UTC).strftime("%Y-%m")
 
 
 def _event(at: datetime, event_type: str, ref: str, detail: "_Detail") -> "LedgerEvent":
     """Build an event whose id is derived from its type and approval ref, so it is unique."""
     return LedgerEvent(at.astimezone(UTC), f"{event_type}:{ref}", event_type, detail)
-
-
-def require_month(month: object) -> None:
-    """Raise InvalidLedgerInputError unless `month` is a "YYYY-MM" string."""
-    if not isinstance(month, str) or _MONTH.fullmatch(month) is None:
-        raise InvalidLedgerInputError("month", 'a month written as "YYYY-MM"')
 
 
 def require_limits(limits: object) -> None:
@@ -227,10 +225,14 @@ class LedgerStore(Protocol):
     atomic write that sets the status, or the disc can never be requested again.
     """
 
-    def snapshot(self, month: str) -> LedgerSnapshot:
-        """Return discs, approvals and spend as the gate reads them.
+    def snapshot(self, at: datetime) -> LedgerSnapshot:
+        """Return discs, approvals and spend as the gate reads them at the time `at`.
 
-        `month` is "YYYY-MM"; pass `month_of(now)` so it matches what a launch counts against.
+        The monthly spend is that of the UTC calendar month of `at`, the same
+        month a launch at that time counts against.
+
+        Raises:
+            InvalidLedgerInputError: if `at` is not a timezone-aware datetime.
         """
         ...
 
