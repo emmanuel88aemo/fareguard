@@ -289,3 +289,47 @@ def test_approval_seeded_by_hand_is_read_as_an_approval(
     assert store.snapshot(AT).approvals == (
         Approval("apr-1", "launch_job", "disc-1", ESTIMATE, "approved", False),
     )
+
+
+def test_amounts_stored_without_trailing_zeros_are_read_in_whole_cents(
+    table: Table, store: DynamoLedgerStore
+) -> None:
+    """Real DynamoDB stores 0.20 as "0.2"; moto keeps what it is given, so write it that way."""
+    table.put(
+        {**DISC_ITEM, "spent_usd": {"N": "0.2"}},
+        {**APPROVAL_ITEM, "approved_usd": {"N": "0.2"}},
+        {"pk": {"S": "SPEND"}, "sk": {"S": "2026-11"}, "spent_usd": {"N": "1"}},
+    )
+
+    snapshot = store.snapshot(AT)
+
+    assert snapshot.disc_spend_usd == {"disc-1": Decimal("0.20")}
+    assert str(snapshot.disc_spend_usd["disc-1"]) == "0.20"
+    assert str(snapshot.approvals[0].approved_usd) == "0.20"
+    assert str(snapshot.month_spend_usd) == "1.00"
+
+
+def test_month_with_no_spend_reads_as_zero_with_two_decimal_places(
+    store: DynamoLedgerStore,
+) -> None:
+    assert str(store.snapshot(AT).month_spend_usd) == "0.00"
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        pytest.param({**DISC_ITEM, "spent_usd": {"N": "0.205"}}, id="disc-spend"),
+        pytest.param(
+            {"pk": {"S": "SPEND"}, "sk": {"S": "2026-11"}, "spent_usd": {"N": "0.205"}},
+            id="month-spend",
+        ),
+        pytest.param({**APPROVAL_ITEM, "approved_usd": {"N": "0.205"}}, id="approved-amount"),
+    ],
+)
+def test_stored_amount_that_is_not_whole_cents_stops_a_snapshot(
+    table: Table, store: DynamoLedgerStore, item: dict[str, Any]
+) -> None:
+    table.put(item)
+
+    with pytest.raises(LedgerDataError, match="_usd"):
+        store.snapshot(AT)

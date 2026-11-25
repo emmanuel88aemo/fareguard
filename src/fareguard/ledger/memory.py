@@ -1,4 +1,7 @@
-"""An in-memory ledger store that enforces the conditions every ledger store must enforce."""
+"""An in-memory ledger store that enforces the conditions every ledger store must enforce.
+
+It returns amounts as every store does: in whole cents, with two decimal places.
+"""
 
 import dataclasses
 import threading
@@ -16,6 +19,7 @@ from fareguard.ledger.store import (
     APPROVED,
     LAUNCH_JOB,
     LAUNCHED,
+    NO_SPEND_USD,
     PENDING,
     ApprovalRequest,
     Launch,
@@ -23,13 +27,28 @@ from fareguard.ledger.store import (
     LaunchResult,
     LedgerEvent,
     event_sort_key,
+    holds_usd,
     month_of,
     refuse,
     require_event_limit,
     require_limits,
+    whole_cents,
 )
 
 _ZERO = Decimal("0")
+
+
+def _approval_in_cents(approval: Approval) -> Approval:
+    amount = whole_cents(approval.approved_usd, "approved_usd")
+    return dataclasses.replace(approval, approved_usd=amount)
+
+
+def _event_in_cents(event: LedgerEvent) -> LedgerEvent:
+    detail = {
+        name: whole_cents(value, name) if isinstance(value, Decimal) and holds_usd(name) else value
+        for name, value in event.detail.items()
+    }
+    return dataclasses.replace(event, detail=detail)
 
 
 class InMemoryLedgerStore:
@@ -54,26 +73,36 @@ class InMemoryLedgerStore:
         }
 
     def snapshot(self, at: datetime) -> LedgerSnapshot:
-        """Return discs, approvals and spend as the gate reads them, for the UTC month of `at`."""
+        """Return discs, approvals and spend as the gate reads them, for the UTC month of `at`.
+
+        Raises:
+            LedgerDataError: if a held amount is not a whole number of cents.
+        """
         month = month_of(at)
         with self._lock:
             return LedgerSnapshot(
                 discs=tuple(self._discs[disc_id] for disc_id in sorted(self._discs)),
-                approvals=tuple(self._approvals[ref] for ref in sorted(self._approvals)),
-                month_spend_usd=self._month_spend.get(month, _ZERO),
-                disc_spend_usd=dict(self._disc_spend),
+                approvals=self._approvals_in_cents(),
+                month_spend_usd=whole_cents(
+                    self._month_spend.get(month, NO_SPEND_USD), "spent_usd"
+                ),
+                disc_spend_usd={
+                    disc_id: whole_cents(spent_usd, "spent_usd")
+                    for disc_id, spent_usd in self._disc_spend.items()
+                },
             )
 
     def recent_events(self, limit: int) -> tuple[LedgerEvent, ...]:
         """Return up to `limit` events, newest first."""
         require_event_limit(limit)
         with self._lock:
-            return tuple(self._events[key] for key in sorted(self._events, reverse=True)[:limit])
+            newest = [self._events[key] for key in sorted(self._events, reverse=True)[:limit]]
+        return tuple(_event_in_cents(event) for event in newest)
 
     def pending_approvals(self) -> tuple[Approval, ...]:
         """Return the approval requests awaiting a decision, ordered by ref."""
         with self._lock:
-            approvals = [self._approvals[ref] for ref in sorted(self._approvals)]
+            approvals = self._approvals_in_cents()
         return tuple(approval for approval in approvals if approval.status == PENDING)
 
     def create_approval_request(
@@ -109,6 +138,10 @@ class InMemoryLedgerStore:
                 spend[key] = spend.get(key, _ZERO) + launch.estimate_usd
             self._events[event_sort_key(launch.event())] = launch.event()
         return LAUNCHED
+
+    def _approvals_in_cents(self) -> tuple[Approval, ...]:
+        """Return every approval, ordered by ref, with its amount in two decimal places."""
+        return tuple(_approval_in_cents(self._approvals[ref]) for ref in sorted(self._approvals))
 
     def _failed_checks(self, launch: Launch, limits: Limits) -> list[LaunchCheck]:
         disc_total = self._disc_spend.get(launch.disc_id, _ZERO) + launch.estimate_usd

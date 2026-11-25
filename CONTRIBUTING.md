@@ -167,6 +167,10 @@ Rules for files:
 ## Infrastructure
 
 - Everything in AWS is declared in `infra/` with Terraform. Nothing is created by hand in the console.
+- **One exception:** the opt-in AWS tests (see [Tests against real DynamoDB](#tests-against-real-dynamodb))
+  may create and delete one temporary table, tagged `Project = fareguard`, outside Terraform.
+  It carries no `Environment` or `ManagedBy` tag because it belongs to no environment and
+  Terraform does not manage it.
 - IAM policies name exact actions and resources. A wildcard needs a comment that justifies it.
 - `terraform fmt` and `terraform validate` must pass.
 
@@ -195,3 +199,22 @@ Run everything CI runs:
 ```bash
 ruff check . && ruff format --check . && mypy && pytest
 ```
+
+### Tests against real DynamoDB
+
+The tests marked `aws` run the ledger store against real DynamoDB. They are skipped unless
+`FAREGUARD_RUN_AWS_TESTS` is exactly `1`. CI never sets it, so a person runs them by hand:
+
+```bash
+FAREGUARD_RUN_AWS_TESTS=1 pytest -m aws --no-cov
+```
+
+- The run **creates a real table and deletes it afterwards**, in the account and region of your
+  default boto3 credentials. It costs a few cents.
+- The table is on-demand, named `fareguard-it-<random suffix>` and tagged `Project = fareguard`.
+  It is deleted even when a test fails. If a run is killed before it can clean up, delete the
+  tables whose names start with `fareguard-it-` yourself.
+- The credentials need `dynamodb:CreateTable`, `DescribeTable`, `TagResource`, `DeleteTable`,
+  `Scan`, `Query`, `GetItem`, `PutItem`, `UpdateItem` and `DeleteItem` on `table/fareguard-it-*`.
+- `--no-cov` is needed because the marker selects only part of the suite, which alone does not
+  reach the coverage threshold.

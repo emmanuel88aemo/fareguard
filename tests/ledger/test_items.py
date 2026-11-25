@@ -69,6 +69,70 @@ def test_amount_survives_a_round_trip_exactly() -> None:
     assert str(read) == "0.30"
 
 
+@pytest.mark.parametrize(
+    ("stored", "read"),
+    [
+        pytest.param("0.2", "0.20", id="trailing-zero-dropped-by-dynamodb"),
+        pytest.param("0.20", "0.20", id="already-two-places"),
+        pytest.param("5", "5.00", id="whole-dollars"),
+        pytest.param("0", "0.00", id="zero"),
+        pytest.param("1E+2", "100.00", id="exponent"),
+        pytest.param("0.200", "0.20", id="extra-zeros"),
+    ],
+)
+def test_usd_amount_is_read_in_whole_cents_with_two_decimal_places(stored: str, read: str) -> None:
+    amount = items.read_usd({"spent_usd": {"N": stored}}, "spent_usd")
+
+    assert type(amount) is Decimal
+    assert str(amount) == read
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        pytest.param({"N": "0.205"}, id="half-a-cent"),
+        pytest.param({"N": "0.001"}, id="a-tenth-of-a-cent"),
+        pytest.param({"N": "-0.20"}, id="negative"),
+        pytest.param({"N": "NaN"}, id="not-a-number"),
+        pytest.param({"N": "Infinity"}, id="infinite"),
+        pytest.param({"N": "1E+30"}, id="too-large-to-express-in-cents"),
+        pytest.param({"S": "0.20"}, id="a-string"),
+    ],
+)
+def test_usd_amount_that_is_not_whole_cents_is_rejected_not_rounded(stored: dict[str, str]) -> None:
+    with pytest.raises(LedgerDataError, match="spent_usd"):
+        items.read_usd({"spent_usd": stored}, "spent_usd")
+
+
+def test_missing_usd_amount_is_rejected() -> None:
+    with pytest.raises(LedgerDataError, match="spent_usd"):
+        items.read_usd({}, "spent_usd")
+
+
+def test_stored_approval_amount_is_read_in_whole_cents() -> None:
+    approval = items.read_approval({**APPROVAL_ITEM, "approved_usd": {"N": "0.2"}})
+
+    assert str(approval.approved_usd) == "0.20"
+
+
+def test_event_detail_reads_usd_amounts_in_whole_cents_and_other_numbers_as_stored() -> None:
+    detail = {"estimate_usd": {"N": "0.2"}, "attempt": {"N": "3"}}
+
+    event = items.read_event({**EVENT_ITEM, "detail": {"M": detail}})
+
+    assert {name: str(value) for name, value in event.detail.items()} == {
+        "estimate_usd": "0.20",
+        "attempt": "3",
+    }
+
+
+def test_event_detail_with_a_usd_amount_that_is_not_whole_cents_is_rejected() -> None:
+    detail = {"estimate_usd": {"N": "0.205"}}
+
+    with pytest.raises(LedgerDataError, match="estimate_usd"):
+        items.read_event({**EVENT_ITEM, "detail": {"M": detail}})
+
+
 def test_key_holds_the_partition_and_sort_key_as_strings() -> None:
     assert items.key("DISC", "disc-1") == {"pk": {"S": "DISC"}, "sk": {"S": "disc-1"}}
 

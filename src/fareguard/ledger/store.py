@@ -12,12 +12,16 @@ Every change of state leaves an event in the same atomic write.
 The monthly cap follows the UTC calendar month. Callers pass times, never
 months: `month_of` is the only place where a month is derived, for reads and
 for writes alike.
+
+Every store returns an amount of USD in whole cents with two decimal places,
+however it keeps the number. A held amount that is not a whole number of cents
+is a LedgerDataError; it is never rounded.
 """
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from enum import IntEnum
 from typing import Protocol
 
@@ -28,7 +32,11 @@ from fareguard.gate.validation import (
     is_amount,
     is_identifier,
 )
-from fareguard.ledger.errors import InvalidLaunchResultError, InvalidLedgerInputError
+from fareguard.ledger.errors import (
+    InvalidLaunchResultError,
+    InvalidLedgerInputError,
+    LedgerDataError,
+)
 
 LAUNCH_JOB = "launch_job"
 JOB_LAUNCHED = "job_launched"
@@ -36,6 +44,8 @@ APPROVAL_REQUESTED = "approval_requested"
 PENDING = "pending"
 APPROVED = "approved"
 _ZERO = Decimal("0")
+_CENT = Decimal("0.01")
+NO_SPEND_USD = Decimal("0.00")
 
 type _Detail = Mapping[str, str | Decimal]
 
@@ -203,6 +213,32 @@ class Launch:
             "month": self.month,
         }
         return _event(self.at, JOB_LAUNCHED, self.approval_ref, detail)
+
+
+def whole_cents(amount: Decimal, attribute: str) -> Decimal:
+    """Return a held amount of USD with exactly two decimal places, the form every store returns.
+
+    Stores differ in how they keep a number: one drops trailing zeros, another
+    keeps them. The amount is never rounded, because a rounded amount is not
+    the amount that was checked against a cap.
+
+    Raises:
+        LedgerDataError: if the amount is not a finite, non-negative Decimal of whole cents.
+    """
+    if not is_amount(amount):
+        raise LedgerDataError(attribute)
+    try:
+        cents = amount.quantize(_CENT)
+    except InvalidOperation as error:
+        raise LedgerDataError(attribute) from error
+    if cents != amount:
+        raise LedgerDataError(attribute)
+    return cents
+
+
+def holds_usd(name: str) -> bool:
+    """Whether the entry `name` of an event detail holds an amount of USD."""
+    return name.endswith("_usd")
 
 
 def event_sort_key(event: LedgerEvent) -> str:

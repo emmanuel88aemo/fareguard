@@ -14,6 +14,7 @@ from fareguard.gate.validation import is_well_formed_snapshot
 from fareguard.ledger.errors import (
     ApprovalRefExistsError,
     InvalidLedgerInputError,
+    LedgerDataError,
     PendingApprovalExistsError,
     UnknownDiscError,
 )
@@ -407,6 +408,51 @@ def test_amounts_stay_decimal_end_to_end(make_store: MakeStore) -> None:
     assert all(type(amount) is Decimal for amount in amounts)
     assert snapshot.month_spend_usd == Decimal("0.30")
     assert str(snapshot.disc_spend_usd["disc-1"]) == "0.20"
+
+
+def test_amounts_are_returned_in_whole_cents_with_two_decimal_places(make_store: MakeStore) -> None:
+    tenth = Decimal("0.1")
+    approvals = [approval(approved_usd=Decimal("0.2")), approval(ref="apr-2", status="pending")]
+    store = make_store(DISCS, approvals, {"disc-2": tenth}, {MONTH: Decimal("1")})
+    store.record_launch(Launch("disc-1", "apr-1", Decimal("0.2"), AT), LIMITS)
+    store.create_approval_request("disc-2", Decimal("0.3"), "apr-3", AT + timedelta(minutes=1))
+
+    snapshot, events = state(store)
+    assert str(snapshot.month_spend_usd) == "1.20"
+    assert {disc: str(spent) for disc, spent in snapshot.disc_spend_usd.items()} == {
+        "disc-1": "0.20",
+        "disc-2": "0.10",
+    }
+    assert [str(a.approved_usd) for a in snapshot.approvals] == ["0.20", "0.20", "0.30"]
+    assert [str(a.approved_usd) for a in store.pending_approvals()] == ["0.20", "0.30"]
+    assert [str(e.detail[key]) for e in events for key in e.detail if key.endswith("_usd")] == [
+        "0.30",
+        "0.20",
+    ]
+
+
+def test_month_with_no_spend_reads_as_zero_in_two_decimal_places(make_store: MakeStore) -> None:
+    assert str(make_store(DISCS).snapshot(AT).month_spend_usd) == "0.00"
+
+
+@pytest.mark.parametrize(
+    ("approvals", "disc_spend", "month_spend"),
+    [
+        pytest.param([approval(approved_usd=Decimal("0.205"))], {}, {}, id="approved-amount"),
+        pytest.param([], {"disc-1": Decimal("0.205")}, {}, id="disc-spend"),
+        pytest.param([], {}, {MONTH: Decimal("0.205")}, id="month-spend"),
+    ],
+)
+def test_held_amount_that_is_not_whole_cents_stops_a_snapshot(
+    make_store: MakeStore,
+    approvals: list[Approval],
+    disc_spend: dict[str, Decimal],
+    month_spend: dict[str, Decimal],
+) -> None:
+    store = make_store(DISCS, approvals, disc_spend, month_spend)
+
+    with pytest.raises(LedgerDataError, match="_usd"):
+        store.snapshot(AT)
 
 
 @pytest.mark.parametrize(

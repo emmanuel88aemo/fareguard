@@ -16,7 +16,13 @@ from typing import TYPE_CHECKING, Any
 
 from fareguard.gate.models import Approval, Disc
 from fareguard.ledger.errors import LedgerDataError
-from fareguard.ledger.store import ApprovalRequest, LedgerEvent, event_sort_key
+from fareguard.ledger.store import (
+    ApprovalRequest,
+    LedgerEvent,
+    event_sort_key,
+    holds_usd,
+    whole_cents,
+)
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.type_defs import AttributeValueTypeDef
@@ -100,6 +106,25 @@ def read_number(item: StoredItem, attribute: str) -> Decimal:
         raise LedgerDataError(attribute) from error
 
 
+def read_usd(item: StoredItem, attribute: str) -> Decimal:
+    """Return an amount of USD in whole cents, with exactly two decimal places.
+
+    DynamoDB drops the trailing zeros of a number, so "0.20" is stored as "0.2".
+    The amount is checked, never rounded.
+
+    Raises:
+        LedgerDataError: if the attribute is missing, is not a number, is negative
+            or not finite, or is not a whole number of cents.
+    """
+    return whole_cents(read_number(item, attribute), attribute)
+
+
+def _read_detail(detail: Mapping[str, StoredItem], name: str) -> str | Decimal:
+    if "S" in detail[name]:
+        return read_text(detail, name)
+    return read_usd(detail, name) if holds_usd(name) else read_number(detail, name)
+
+
 def read_disc(item: StoredItem) -> Disc:
     """Return the disc stored in `item`.
 
@@ -116,14 +141,15 @@ def read_approval(item: StoredItem) -> Approval:
     """Return the approval stored in `item`.
 
     Raises:
-        LedgerDataError: if an attribute is missing or has the wrong type.
+        LedgerDataError: if an attribute is missing or has the wrong type, or the
+            amount is not in whole cents.
     """
     consumed: bool = _read(item, "consumed", "BOOL", bool)
     return Approval(
         ref=read_text(item, "sk"),
         action=read_text(item, "action"),
         disc_id=read_text(item, "disc_id"),
-        approved_usd=read_number(item, "approved_usd"),
+        approved_usd=read_usd(item, "approved_usd"),
         status=read_text(item, "status"),
         consumed=consumed,
     )
@@ -137,10 +163,7 @@ def read_event(item: StoredItem) -> LedgerEvent:
     """
     timestamp, _, event_id = read_text(item, "sk").partition("#")
     stored: Mapping[str, StoredItem] = _read(item, "detail", "M", Mapping)
-    detail: dict[str, str | Decimal] = {
-        name: read_text(stored, name) if "S" in value else read_number(stored, name)
-        for name, value in stored.items()
-    }
+    detail = {name: _read_detail(stored, name) for name in stored}
     try:
         at = datetime.fromisoformat(timestamp)
     except ValueError as error:
