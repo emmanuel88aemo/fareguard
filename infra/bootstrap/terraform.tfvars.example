@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars, which Git ignores, and choose a name.
+# Bucket names are global: add something only your account would use.
+state_bucket_name = "fareguard-CHANGE-ME-tfstate"
+
+# Optional. These are the defaults.
+# region      = "us-east-1"
+# environment = "dev"
