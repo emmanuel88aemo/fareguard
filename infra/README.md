@@ -23,8 +23,12 @@ No workflow plans or applies this yet: a person runs the commands below.
 | Role of the tools Lambda | `fareguard-<env>-tools-lambda` |
 | Hook Lambda function | `fareguard-<env>-hook` |
 | Tools Lambda function | `fareguard-<env>-tools` |
+| Role of the gateway | `fareguard-<env>-gateway` |
+| AgentCore Gateway | `fareguard-<env>-gateway` |
+| Target of the gateway, the tools function | `fareguard` |
 
-It creates no gateway, guardrail or harness yet, so nothing invokes the functions.
+It creates no guardrail or harness yet, so nothing calls the gateway or invokes the hook
+function.
 
 ### The Lambda functions
 
@@ -59,10 +63,35 @@ The zip holds no dependency. The code needs only `boto3`, and the Python runtime
 provides it; see [decision record 0004](../docs/decisions/0004-lambda-package-without-dependencies.md).
 There is no `pip install` and no build script: plan and apply are the whole deployment.
 
+### The gateway
+
+The gateway speaks MCP and authorises its callers with IAM (`AWS_IAM`): a caller signs its
+request and needs `bedrock-agentcore:InvokeGateway` on this gateway. No role has that
+permission yet. The reasons are in
+[decision record 0005](../docs/decisions/0005-gateway-with-iam-inbound-and-a-role-for-one-function.md).
+
+It has one target, named `fareguard`, which is the tools function, invoked with the
+gateway's own role. A caller sees each tool as `fareguard___<tool>`; the hook and the tools
+handler remove that prefix. The target declares exactly four tools:
+
+| Tool | Arguments |
+|---|---|
+| `read_ledger` | none |
+| `list_pending` | none |
+| `request_approval` | `disc_id` |
+| `launch_job` | `disc_id`, `approval_ref` |
+
+Every argument is a required string. The descriptions say what each tool does and state no
+rule or limit: the rules are enforced by the hook and by the tools, not by a description.
+
+The function has no resource policy. The gateway and the function are in the same account,
+where the policy of the gateway's role is enough to invoke it.
+
 ### What the roles may do
 
-Both roles are trusted by `lambda.amazonaws.com` only. Each has one inline policy and no
-managed policy; Terraform removes any other policy it finds on them.
+The two Lambda roles are trusted by `lambda.amazonaws.com` only. The gateway role is trusted
+by `bedrock-agentcore.amazonaws.com` only, and only for resources of this account. Each has
+one inline policy and no managed policy; Terraform removes any other policy it finds on them.
 
 | Role | Actions | On |
 |---|---|---|
@@ -72,6 +101,7 @@ managed policy; Terraform removes any other policy it finds on them.
 | tools | `dynamodb:PutItem` | items of the ledger table whose partition key is `APPROVAL` or `EVENT` |
 | tools | `dynamodb:UpdateItem` | items of the ledger table whose partition key is `DISC`, `APPROVAL` or `SPEND` |
 | tools | `logs:CreateLogStream`, `logs:PutLogEvents` | the streams of its own log group |
+| gateway | `lambda:InvokeFunction` | the tools function |
 
 ## Before you start
 
@@ -123,7 +153,7 @@ After changing `backend.hcl`, run `terraform init -reconfigure -backend-config=b
 terraform plan -out=tfplan
 ```
 
-Read the plan. The first one creates 13 resources and destroys none. It also writes the zip
+Read the plan. The first one creates 19 resources and destroys none. It also writes the zip
 of the functions, so apply the plan from the same checkout that made it.
 
 ## 4. Apply
@@ -169,4 +199,5 @@ cd ../main && terraform init -backend=false && terraform validate
 
 `validate` checks that the configuration is consistent. It does not build the zip, and it
 does not check that AWS accepts the configuration, that the policies grant what the code
-needs or that the functions start; only a plan and an apply show that.
+needs, that the functions start or that the gateway reaches the tools function; only a plan
+and an apply show that.
