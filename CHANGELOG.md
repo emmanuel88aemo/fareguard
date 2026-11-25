@@ -17,3 +17,5 @@ All notable changes to this project are recorded here. The format follows
   approval refs have a strict shape, and a denial reason never repeats other text from the call.
 - Ledger store contract and an in-memory implementation: a launch consumes its approval,
   adds to the disc and monthly spend and writes its event atomically, or changes nothing.
+- DynamoDB ledger store: one table, with each launch and each approval request written as a
+  single transaction of conditional writes.
