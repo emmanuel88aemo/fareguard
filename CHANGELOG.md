@@ -19,3 +19,5 @@ All notable changes to this project are recorded here. The format follows
   adds to the disc and monthly spend and writes its event atomically, or changes nothing.
 - DynamoDB ledger store: one table, with each launch and each approval request written as a
   single transaction of conditional writes.
+- Opt-in tests of the DynamoDB ledger store against real DynamoDB, selected by the `aws` marker
+  and skipped unless `FAREGUARD_RUN_AWS_TESTS=1`.
