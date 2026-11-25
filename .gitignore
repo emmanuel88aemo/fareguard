@@ -221,3 +221,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Terraform: local working files, state, plans and anything account-specific.
+# The lock files (.terraform.lock.hcl) and the *.example files are committed.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+*.tfvars
+*.tfvars.json
+backend.hcl
