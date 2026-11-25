@@ -33,6 +33,7 @@ DENIAL_REASONS: Mapping[RuleId, str] = {
     ),
     "R5": "R5: the call is malformed, incomplete or could not be evaluated",
     "R6": "R6: the disc already has an approval request awaiting a decision",
+    "R7": "R7: the content guardrail blocked the text of this event",
 }
 
 
