@@ -1,6 +1,5 @@
 """Allow or deny one proposed tool call against the rules R1 to R5."""
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -15,7 +14,9 @@ from fareguard.gate.models import (
 )
 from fareguard.gate.pricing import PricingError, estimate_cost
 from fareguard.gate.validation import (
+    IDENTIFIER_SHAPE,
     are_well_formed_limits,
+    is_identifier,
     is_well_formed_call,
     is_well_formed_snapshot,
 )
@@ -27,8 +28,8 @@ LAUNCH_JOB = "launch_job"
 
 _READ_TOOLS: frozenset[str] = frozenset({READ_LEDGER, LIST_PENDING})
 _TOOLS: frozenset[str] = _READ_TOOLS | {REQUEST_APPROVAL, LAUNCH_JOB}
-_REQUEST_APPROVAL_ARGUMENTS: frozenset[str] = frozenset({"disc_id"})
-_LAUNCH_JOB_ARGUMENTS: frozenset[str] = frozenset({"disc_id", "approval_ref"})
+_REQUEST_APPROVAL_ARGUMENTS: tuple[str, ...] = ("disc_id",)
+_LAUNCH_JOB_ARGUMENTS: tuple[str, ...] = ("disc_id", "approval_ref")
 _APPROVED = "approved"
 _ZERO = Decimal("0")
 _ALLOWED = Decision(allowed=True, rule=None, reason="allowed")
@@ -50,12 +51,17 @@ def evaluate(call: ToolCall, snapshot: LedgerSnapshot, limits: Limits) -> Decisi
     its own shape or that of the snapshot or the limits, is denied with R5.
     Every denial names the rule that failed. The cost of a job is always
     computed from the disc's duration in the snapshot, never taken from the call.
+
+    The reason is returned to the agent, so it never repeats text from the call
+    unless that text is the name of a real tool or has the strict shape of an
+    identifier. An unknown tool name, argument names and malformed argument
+    values are described, not quoted.
     """
     if not is_well_formed_call(call):
         return _deny("R5", "the tool call must have a string name and a mapping of arguments")
     if call.name not in _TOOLS:
         tools = ", ".join(sorted(_TOOLS))
-        return _deny("R1", f"tool {call.name!r} does not exist; the only tools are {tools}")
+        return _deny("R1", f"the requested tool does not exist; the only tools are {tools}")
     return _evaluate_known_tool(call, snapshot, limits)
 
 
@@ -71,23 +77,23 @@ def _evaluate_known_tool(call: ToolCall, snapshot: LedgerSnapshot, limits: Limit
 
 def _evaluate_read(call: ToolCall) -> Decision:
     if len(call.arguments) > 0:
-        return _deny("R5", f"{call.name} takes no arguments; got {_describe(call.arguments)}")
+        return _deny("R5", f"{call.name} takes no arguments; got {len(call.arguments)}")
     return _ALLOWED
 
 
 def _evaluate_request_approval(call: ToolCall, snapshot: LedgerSnapshot) -> Decision:
-    arguments = _string_arguments(call.arguments, _REQUEST_APPROVAL_ARGUMENTS)
-    if arguments is None:
-        return _deny_arguments(call, _REQUEST_APPROVAL_ARGUMENTS)
+    arguments = _read_arguments(call, _REQUEST_APPROVAL_ARGUMENTS)
+    if isinstance(arguments, Decision):
+        return arguments
     if _find_disc(snapshot, arguments["disc_id"]) is None:
         return _deny_unknown_disc(arguments["disc_id"])
     return _ALLOWED
 
 
 def _evaluate_launch_job(call: ToolCall, snapshot: LedgerSnapshot, limits: Limits) -> Decision:
-    arguments = _string_arguments(call.arguments, _LAUNCH_JOB_ARGUMENTS)
-    if arguments is None:
-        return _deny_arguments(call, _LAUNCH_JOB_ARGUMENTS)
+    arguments = _read_arguments(call, _LAUNCH_JOB_ARGUMENTS)
+    if isinstance(arguments, Decision):
+        return arguments
     if not are_well_formed_limits(limits):
         return _deny("R5", "the limits are malformed, so no spend can be checked")
     disc = _find_disc(snapshot, arguments["disc_id"])
@@ -173,14 +179,23 @@ def _approval_problem(approval: Approval, launch: _Launch) -> str | None:
     return next((reason for failed, reason in checks if failed), None)
 
 
-def _string_arguments(
-    arguments: Mapping[str, object], expected: frozenset[str]
-) -> dict[str, str] | None:
-    """Return the arguments when they are exactly the `expected` keys with string values."""
-    if set(arguments) != expected:
-        return None
-    strings = {key: value for key, value in arguments.items() if isinstance(value, str)}
-    return strings if len(strings) == len(expected) else None
+def _read_arguments(call: ToolCall, expected: tuple[str, ...]) -> dict[str, str] | Decision:
+    """Return the arguments of `call`, or the denial that explains what is wrong with them.
+
+    The arguments must be exactly the `expected` names, each with a string
+    value that has the shape of an identifier. The denial names the expected
+    arguments only: names and values sent by the agent are never repeated.
+    """
+    strings = {key: value for key, value in call.arguments.items() if isinstance(value, str)}
+    if set(call.arguments) != set(expected) or len(strings) != len(expected):
+        names = ", ".join(expected)
+        return _deny("R5", f"{call.name} takes exactly the string arguments {names}")
+    malformed = next((name for name in expected if not is_identifier(strings[name])), None)
+    if malformed is not None:
+        return _deny(
+            "R5", f"{call.name} argument {malformed} is malformed; expected {IDENTIFIER_SHAPE}"
+        )
+    return strings
 
 
 def _find_disc(snapshot: LedgerSnapshot, disc_id: str) -> Disc | None:
@@ -191,22 +206,5 @@ def _deny(rule: RuleId, reason: str) -> Decision:
     return Decision(allowed=False, rule=rule, reason=reason)
 
 
-def _deny_arguments(call: ToolCall, expected: frozenset[str]) -> Decision:
-    names = ", ".join(sorted(expected))
-    return _deny(
-        "R5",
-        f"{call.name} takes exactly the string arguments {names}; got {_describe(call.arguments)}",
-    )
-
-
 def _deny_unknown_disc(disc_id: str) -> Decision:
     return _deny("R5", f"disc {disc_id!r} is not in the ledger snapshot")
-
-
-def _describe(arguments: Mapping[str, object]) -> str:
-    """List argument names and value types, without echoing the values."""
-    if len(arguments) == 0:
-        return "no arguments"
-    return ", ".join(
-        sorted(f"{key!r} ({type(value).__name__})" for key, value in arguments.items())
-    )

@@ -4,10 +4,25 @@ Type annotations are not enforced at run time, so the gate verifies its inputs
 before it compares amounts. Every check returns a bool and none raises.
 """
 
+import re
 from collections.abc import Iterable, Mapping
 from decimal import Decimal
 
 from fareguard.gate.models import Approval, Disc, LedgerSnapshot, Limits, ToolCall
+
+IDENTIFIER_SHAPE = (
+    "1 to 64 characters from a-z, 0-9, '.', '_', ':' and '-', starting with a letter or a digit"
+)
+_IDENTIFIER = re.compile(r"[a-z0-9][a-z0-9._:-]{0,63}")
+
+
+def is_identifier(value: object) -> bool:
+    """Whether `value` is a string with the strict shape of a disc id or an approval ref.
+
+    Only text that passes this check may be quoted in a denial reason, because
+    the reason is returned to the agent that supplied the text.
+    """
+    return isinstance(value, str) and _IDENTIFIER.fullmatch(value) is not None
 
 
 def is_amount(value: object) -> bool:
@@ -33,7 +48,7 @@ def _is_well_formed_disc(disc: object) -> bool:
     # bool is a subclass of int, so an exact type check keeps True from counting as one second.
     return (
         isinstance(disc, Disc)
-        and isinstance(disc.disc_id, str)
+        and is_identifier(disc.disc_id)
         and type(disc.duration_seconds) is int
     )
 
@@ -41,10 +56,10 @@ def _is_well_formed_disc(disc: object) -> bool:
 def _is_well_formed_approval(approval: object) -> bool:
     return (
         isinstance(approval, Approval)
-        and all(
-            isinstance(text, str)
-            for text in (approval.ref, approval.action, approval.disc_id, approval.status)
-        )
+        and is_identifier(approval.ref)
+        and is_identifier(approval.disc_id)
+        and isinstance(approval.action, str)
+        and isinstance(approval.status, str)
         and isinstance(approval.consumed, bool)
         and is_amount(approval.approved_usd)
     )
@@ -67,7 +82,7 @@ def _has_well_formed_spend(snapshot: LedgerSnapshot) -> bool:
         is_amount(snapshot.month_spend_usd)
         and isinstance(snapshot.disc_spend_usd, Mapping)
         and all(
-            isinstance(disc_id, str) and is_amount(spent_usd)
+            is_identifier(disc_id) and is_amount(spent_usd)
             for disc_id, spent_usd in snapshot.disc_spend_usd.items()
         )
     )
