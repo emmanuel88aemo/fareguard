@@ -1,5 +1,6 @@
 """Fixtures shared by the ledger tests: one seeded store per implementation."""
 
+import os
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -17,6 +18,20 @@ if TYPE_CHECKING:
     from mypy_boto3_dynamodb import DynamoDBClient
 
 TABLE = "fareguard-test-ledger"
+RUN_AWS_TESTS = "FAREGUARD_RUN_AWS_TESTS"
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Skip every test marked "aws" unless FAREGUARD_RUN_AWS_TESTS is exactly "1".
+
+    A skipped test sets up no fixture, so the default run creates no client.
+    """
+    if os.environ.get(RUN_AWS_TESTS) == "1":
+        return
+    skip = pytest.mark.skip(reason=f"uses real AWS; set {RUN_AWS_TESTS}=1 to run it")
+    for item in items:
+        if item.get_closest_marker("aws") is not None:
+            item.add_marker(skip)
 
 
 @pytest.fixture
