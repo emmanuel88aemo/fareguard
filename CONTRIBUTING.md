@@ -38,7 +38,7 @@ Rules checked by CI and by the `commit-msg` hook:
 
 - The summary starts in lower case, has no final period and uses the imperative ("add", not "added").
 - The whole subject is at most 72 characters.
-- The scope is lower case: `gate`, `tools`, `infra`, `stress`, `docs`.
+- The scope is lower case: `gate`, `ledger`, `tools`, `infra`, `stress`, `docs`.
 - A breaking change adds `!` before the colon.
 
 Use the body to explain why, not what. When a commit fixes a rule that failed under
