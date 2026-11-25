@@ -15,3 +15,5 @@ All notable changes to this project are recorded here. The format follows
   `evaluate` function that allows or denies a tool call against rules R1 to R5. Every denial
   names its rule; R5 denies a call that is malformed or cannot be evaluated. Disc ids and
   approval refs have a strict shape, and a denial reason never repeats other text from the call.
+- Ledger store contract and an in-memory implementation: a launch consumes its approval,
+  adds to the disc and monthly spend and writes its event atomically, or changes nothing.
