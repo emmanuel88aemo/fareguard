@@ -4,6 +4,7 @@ from fareguard.ledger.errors import (
     ApprovalRefExistsError,
     InvalidLaunchResultError,
     InvalidLedgerInputError,
+    LedgerDataError,
     LedgerError,
     LedgerTransactionError,
     PendingApprovalExistsError,
@@ -40,3 +41,10 @@ def test_invalid_input_is_also_a_value_error() -> None:
 
 def test_invalid_launch_result_error_shows_the_contradiction() -> None:
     assert "launched=True with rule='R2'" in str(InvalidLaunchResultError(True, "R2"))
+
+
+def test_data_error_names_the_attribute() -> None:
+    error = LedgerDataError("spent_usd")
+
+    assert isinstance(error, LedgerError)
+    assert "'spent_usd'" in str(error)
