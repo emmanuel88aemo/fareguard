@@ -1,4 +1,4 @@
-"""Allow or deny one proposed tool call against the spend rules R1 to R4."""
+"""Allow or deny one proposed tool call against the rules R1 to R5."""
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -41,12 +41,13 @@ class _Launch:
 def evaluate(call: ToolCall, snapshot: LedgerSnapshot, limits: Limits) -> Decision:
     """Decide whether `call` may run, given the ledger `snapshot` and `limits`.
 
-    Never raises: input that is malformed or of the wrong type is denied. The
-    cost of a job is always computed from the disc's duration in the snapshot,
-    never taken from the call.
+    Never raises: a call that is malformed or cannot be evaluated, because of
+    its own shape or that of the snapshot or the limits, is denied with R5.
+    Every denial names the rule that failed. The cost of a job is always
+    computed from the disc's duration in the snapshot, never taken from the call.
     """
     if not _is_well_formed_call(call):
-        return _deny(None, "the tool call must have a string name and a mapping of arguments")
+        return _deny("R5", "the tool call must have a string name and a mapping of arguments")
     if call.name not in _TOOLS:
         tools = ", ".join(sorted(_TOOLS))
         return _deny("R1", f"tool {call.name!r} does not exist; the only tools are {tools}")
@@ -57,7 +58,7 @@ def _evaluate_known_tool(call: ToolCall, snapshot: LedgerSnapshot, limits: Limit
     if call.name in _READ_TOOLS:
         return _evaluate_read(call)
     if not _is_well_formed_snapshot(snapshot):
-        return _deny(None, "the ledger snapshot is malformed, so no spend can be checked")
+        return _deny("R5", "the ledger snapshot is malformed, so no spend can be checked")
     if call.name == REQUEST_APPROVAL:
         return _evaluate_request_approval(call, snapshot)
     return _evaluate_launch_job(call, snapshot, limits)
@@ -65,7 +66,7 @@ def _evaluate_known_tool(call: ToolCall, snapshot: LedgerSnapshot, limits: Limit
 
 def _evaluate_read(call: ToolCall) -> Decision:
     if len(call.arguments) > 0:
-        return _deny(None, f"{call.name} takes no arguments; got {_describe(call.arguments)}")
+        return _deny("R5", f"{call.name} takes no arguments; got {_describe(call.arguments)}")
     return _ALLOWED
 
 
@@ -83,7 +84,7 @@ def _evaluate_launch_job(call: ToolCall, snapshot: LedgerSnapshot, limits: Limit
     if arguments is None:
         return _deny_arguments(call, _LAUNCH_JOB_ARGUMENTS)
     if not _are_well_formed_limits(limits):
-        return _deny(None, "the limits are malformed, so no spend can be checked")
+        return _deny("R5", "the limits are malformed, so no spend can be checked")
     disc = _find_disc(snapshot, arguments["disc_id"])
     if disc is None:
         return _deny_unknown_disc(arguments["disc_id"])
@@ -96,7 +97,7 @@ def _evaluate_launch(
     try:
         estimate_usd = estimate_cost(disc.duration_seconds, limits.usd_per_minute)
     except PricingError as error:
-        return _deny(None, f"the cost of disc {disc.disc_id!r} cannot be estimated: {error}")
+        return _deny("R5", f"the cost of disc {disc.disc_id!r} cannot be estimated: {error}")
     launch = _Launch(disc.disc_id, approval_ref, estimate_usd)
     return (
         _check_disc_cap(launch, snapshot, limits)
@@ -181,20 +182,20 @@ def _find_disc(snapshot: LedgerSnapshot, disc_id: str) -> Disc | None:
     return next((disc for disc in snapshot.discs if disc.disc_id == disc_id), None)
 
 
-def _deny(rule: RuleId | None, reason: str) -> Decision:
+def _deny(rule: RuleId, reason: str) -> Decision:
     return Decision(allowed=False, rule=rule, reason=reason)
 
 
 def _deny_arguments(call: ToolCall, expected: frozenset[str]) -> Decision:
     names = ", ".join(sorted(expected))
     return _deny(
-        None,
+        "R5",
         f"{call.name} takes exactly the string arguments {names}; got {_describe(call.arguments)}",
     )
 
 
 def _deny_unknown_disc(disc_id: str) -> Decision:
-    return _deny(None, f"disc {disc_id!r} is not in the ledger snapshot")
+    return _deny("R5", f"disc {disc_id!r} is not in the ledger snapshot")
 
 
 def _describe(arguments: Mapping[str, object]) -> str:

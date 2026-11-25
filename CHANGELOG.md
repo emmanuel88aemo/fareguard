@@ -12,4 +12,5 @@ All notable changes to this project are recorded here. The format follows
 - Conventional Commits check for commit subjects.
 - Contributing guide, decision records and security policy.
 - Pure decision logic for the spend gate: typed models, started-minute pricing and an
-  `evaluate` function that allows or denies a tool call against rules R1 to R4.
+  `evaluate` function that allows or denies a tool call against rules R1 to R5. Every denial
+  names its rule; R5 denies a call that is malformed or cannot be evaluated.

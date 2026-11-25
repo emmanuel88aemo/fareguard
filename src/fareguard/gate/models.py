@@ -5,7 +5,18 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Literal
 
-type RuleId = Literal["R1", "R2", "R3", "R4"]
+type RuleId = Literal["R1", "R2", "R3", "R4", "R5"]
+
+
+class InvalidDecisionError(ValueError):
+    """A Decision was built with a rule that contradicts its outcome."""
+
+    def __init__(self, allowed: bool, rule: RuleId | None) -> None:
+        """Record the contradicting pair."""
+        super().__init__(
+            "a decision names a rule if and only if it denies; "
+            f"got allowed={allowed!r} with rule={rule!r}"
+        )
 
 
 @dataclass(frozen=True)
@@ -63,11 +74,20 @@ class ToolCall:
 class Decision:
     """The outcome of evaluating one tool call.
 
-    `rule` names the rule that denied the call. It is None when the call is
-    allowed, and also when the call is denied for malformed input rather than
-    for one of the numbered rules.
+    `rule` names the rule that denied the call. It is None if and only if the
+    call is allowed: every denial names a rule, and R5 is the rule for a call
+    that is malformed or cannot be evaluated.
+
+    Raises:
+        InvalidDecisionError: if an allowed decision names a rule, or a denial
+            names none.
     """
 
     allowed: bool
     rule: RuleId | None
     reason: str
+
+    def __post_init__(self) -> None:
+        """Reject a decision whose rule contradicts its outcome."""
+        if self.allowed is not (self.rule is None):
+            raise InvalidDecisionError(self.allowed, self.rule)

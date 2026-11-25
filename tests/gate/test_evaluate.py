@@ -47,7 +47,7 @@ def with_spend(month: str = "0.00", disc: str | None = None) -> LedgerSnapshot:
     return dataclasses.replace(SNAPSHOT, month_spend_usd=Decimal(month), disc_spend_usd=disc_spend)
 
 
-def assert_denied(decision: Decision, rule: str | None) -> None:
+def assert_denied(decision: Decision, rule: str) -> None:
     assert decision.allowed is False
     assert decision.rule == rule
     assert decision.reason
@@ -268,8 +268,8 @@ def test_first_failing_rule_is_reported(snapshot: LedgerSnapshot, rule: str) -> 
         pytest.param(cast("ToolCall", {"name": "read_ledger"}), id="call-is-a-dict"),
     ],
 )
-def test_malformed_call_is_denied_without_raising(call: ToolCall) -> None:
-    assert_denied(evaluate(call, SNAPSHOT, LIMITS), None)
+def test_malformed_call_is_denied_by_r5_without_raising(call: ToolCall) -> None:
+    assert_denied(evaluate(call, SNAPSHOT, LIMITS), "R5")
 
 
 def test_reason_for_unexpected_arguments_names_them() -> None:
@@ -326,10 +326,10 @@ def test_reason_for_unexpected_arguments_names_them() -> None:
         ),
     ],
 )
-def test_launch_on_a_malformed_snapshot_is_denied_without_raising(
+def test_launch_on_a_malformed_snapshot_is_denied_by_r5_without_raising(
     snapshot: LedgerSnapshot,
 ) -> None:
-    assert_denied(evaluate(LAUNCH, snapshot, LIMITS), None)
+    assert_denied(evaluate(LAUNCH, snapshot, LIMITS), "R5")
 
 
 @pytest.mark.parametrize(
@@ -343,11 +343,11 @@ def test_launch_on_a_malformed_snapshot_is_denied_without_raising(
         pytest.param(Limits(usd_per_minute=Decimal("-0.02")), id="rate-is-negative"),
     ],
 )
-def test_launch_with_malformed_limits_is_denied_without_raising(limits: Limits) -> None:
-    assert_denied(evaluate(LAUNCH, SNAPSHOT, limits), None)
+def test_launch_with_malformed_limits_is_denied_by_r5_without_raising(limits: Limits) -> None:
+    assert_denied(evaluate(LAUNCH, SNAPSHOT, limits), "R5")
 
 
-def test_request_approval_on_a_malformed_snapshot_is_denied() -> None:
+def test_request_approval_on_a_malformed_snapshot_is_denied_by_r5() -> None:
     call = ToolCall("request_approval", {"disc_id": "disc-1"})
 
-    assert_denied(evaluate(call, with_spend(month="NaN"), LIMITS), None)
+    assert_denied(evaluate(call, with_spend(month="NaN"), LIMITS), "R5")
