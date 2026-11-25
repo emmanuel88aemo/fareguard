@@ -1,0 +1,5 @@
+# Copy to backend.hcl, which Git ignores, and pass it to terraform init:
+#   terraform init -backend-config=backend.hcl
+bucket = "fareguard-CHANGE-ME-tfstate" # the state_bucket_name given to infra/bootstrap
+key    = "main/dev/terraform.tfstate"  # one key per environment
+region = "us-east-1"                   # the region of the bucket

@@ -65,6 +65,17 @@ All notable changes to this project are recorded here. The format follows
   assumptions to confirm at deploy time. It logs one JSON line per call and answers any error,
   including a missing or invalid environment variable, with a refusal under R5. It is not
   deployed: no Terraform exists yet.
+- Terraform base in `infra/`, described in `infra/README.md` and decision record 0003.
+  `infra/bootstrap` creates the S3 bucket for the state; `infra/main` keeps its state there,
+  locked with the S3 lock file, and creates the ledger table, a log group per Lambda with 14
+  days of retention and a role per Lambda. No function, gateway, guardrail or harness exists
+  yet. It passes `terraform validate` only: nothing has been planned or applied in AWS.
+- The role of the hook Lambda may query and get items of the ledger table and write to its
+  own log group. The role of the tools Lambda may also put items whose partition key is
+  `APPROVAL` or `EVENT` and update items whose partition key is `DISC`, `APPROVAL` or `SPEND`.
+  It cannot delete an item or update an event, whatever the code does.
+- CI job that checks `terraform fmt` and runs `terraform validate` in both directories,
+  without AWS credentials.
 
 ### Fixed
 
