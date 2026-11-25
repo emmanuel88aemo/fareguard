@@ -45,6 +45,14 @@ class UnknownDiscError(LedgerError):
         super().__init__(f"disc {disc_id!r} is not in the ledger")
 
 
+class LedgerDataError(LedgerError):
+    """A stored item does not have the attributes or types the ledger writes."""
+
+    def __init__(self, attribute: str) -> None:
+        """Name the attribute that is missing or has the wrong type."""
+        super().__init__(f"a stored item has no usable attribute {attribute!r}")
+
+
 class LedgerTransactionError(LedgerError):
     """A transaction was cancelled for a reason other than a failed condition."""
 
