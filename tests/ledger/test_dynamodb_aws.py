@@ -184,6 +184,12 @@ def test_every_expression_is_accepted_without_a_reserved_word_error(
     assert store.snapshot(AT).month_spend_usd == ESTIMATE * 2
     assert [a.ref for a in store.pending_approvals()] == ["apr-3"]
     assert len(store.recent_events(2)) == 2
+    # The decision: its condition on the approval, the removal of the mark and its event.
+    assert store.decide_approval("apr-3", False, AT).status == "rejected"
+    assert store.pending_approvals() == ()
+    store.create_approval_request("disc-2", ESTIMATE, "apr-4", AT)
+    assert store.decide_approval("apr-4", True, AT).status == "approved"
+    assert store.record_launch(Launch("disc-2", "apr-4", ESTIMATE, AT), LIMITS).launched is True
 
 
 def test_same_approval_launched_from_two_threads_is_recorded_once(

@@ -7,9 +7,12 @@ from typing import TYPE_CHECKING, Any
 from fareguard.gate.models import Approval, LedgerSnapshot, Limits
 from fareguard.ledger import items
 from fareguard.ledger.errors import (
+    ApprovalDiscMismatchError,
+    ApprovalNotPendingError,
     ApprovalRefExistsError,
     LedgerTransactionError,
     PendingApprovalExistsError,
+    UnknownApprovalError,
     UnknownDiscError,
 )
 from fareguard.ledger.store import (
@@ -18,7 +21,9 @@ from fareguard.ledger.store import (
     LAUNCHED,
     NO_SPEND_USD,
     PENDING,
+    ApprovalDecision,
     ApprovalRequest,
+    DecidedApproval,
     Launch,
     LaunchCheck,
     LaunchResult,
@@ -40,8 +45,11 @@ _APPROVAL_COVERS_LAUNCH = (
     "#status = :approved AND #consumed = :false AND #action = :launch_job "
     "AND disc_id = :disc_id AND approved_usd >= :estimate"
 )
+_APPROVAL_AWAITS_DECISION = "#status = :pending AND #consumed = :false AND disc_id = :disc_id"
 # status, consumed and action are reserved words in DynamoDB expressions.
 _APPROVAL_NAMES = {"#status": "status", "#consumed": "consumed", "#action": "action"}
+# DynamoDB rejects a name that no expression of the write uses, so the decision has its own.
+_DECISION_NAMES = {"#status": "status", "#consumed": "consumed"}
 
 
 def _failed(reason: items.StoredItem) -> bool:
@@ -120,6 +128,35 @@ class DynamoLedgerStore:
             raise PendingApprovalExistsError(disc_id)
         raise LedgerTransactionError(["the event of this request already exists"])
 
+    def decide_approval(self, ref: str, approved: bool, at: datetime) -> DecidedApproval:
+        """Set the status, clear the mark on the disc and log the decision, or write nothing.
+
+        The approval is read first, only to learn its disc. The conditions of
+        the transaction, not that read, decide whether the decision is written.
+        """
+        decision = ApprovalDecision(ref, approved, at)
+        held = self._client.get_item(
+            TableName=self._table, Key=items.key(items.APPROVAL, ref), ConsistentRead=True
+        ).get("Item")
+        if held is None:
+            raise UnknownApprovalError(ref)
+        disc_id = items.read_text(held, "disc_id")
+        reasons = self._transact(
+            [
+                self._set_status(decision, disc_id),
+                self._clear_pending_mark(disc_id, ref),
+                self._put_if_new(items.event_item(decision.event(disc_id))),
+            ]
+        )
+        if reasons is None:
+            return decision.outcome(disc_id)
+        approval, disc, _ = reasons
+        if _failed(approval):
+            raise ApprovalNotPendingError(ref)
+        if _failed(disc):
+            raise ApprovalDiscMismatchError(ref, disc_id)
+        raise LedgerTransactionError(["the event of this decision already exists"])
+
     def record_launch(self, launch: Launch, limits: Limits) -> LaunchResult:
         """Apply the launch in one transaction of four writes, or change nothing and say why."""
         require_limits(limits)
@@ -143,6 +180,36 @@ class DynamoLedgerStore:
             LaunchCheck.DUPLICATE_EVENT: _failed(event),
         }
         return refuse(check for check, failed in checks.items() if failed)
+
+    def _set_status(self, decision: ApprovalDecision, disc_id: str) -> "TransactWriteItemTypeDef":
+        """Decide the approval only while it is pending and not consumed. It stays unconsumed."""
+        return {
+            "Update": {
+                "TableName": self._table,
+                "Key": items.key(items.APPROVAL, decision.ref),
+                "UpdateExpression": "SET #status = :decision",
+                "ConditionExpression": _APPROVAL_AWAITS_DECISION,
+                "ExpressionAttributeNames": _DECISION_NAMES,
+                "ExpressionAttributeValues": {
+                    ":decision": items.text(decision.status),
+                    ":pending": items.text(PENDING),
+                    ":false": {"BOOL": False},
+                    ":disc_id": items.text(disc_id),
+                },
+            }
+        }
+
+    def _clear_pending_mark(self, disc_id: str, ref: str) -> "TransactWriteItemTypeDef":
+        """Free the disc for a new request only if its mark is exactly `ref`."""
+        return {
+            "Update": {
+                "TableName": self._table,
+                "Key": items.key(items.DISC, disc_id),
+                "UpdateExpression": "REMOVE pending_approval_ref",
+                "ConditionExpression": "pending_approval_ref = :ref",
+                "ExpressionAttributeValues": {":ref": items.text(ref)},
+            }
+        }
 
     def _consume_approval(self, launch: Launch) -> "TransactWriteItemTypeDef":
         return {

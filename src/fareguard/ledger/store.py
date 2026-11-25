@@ -5,9 +5,11 @@ concurrent launches can both pass the gate. `record_launch` therefore checks
 the spend rules again and applies a launch atomically: either the approval is
 consumed, both spends grow and the event is written, or nothing changes.
 
-A store has no operation that edits or deletes an event, decides an approval
-or changes a limit. A person decides approvals through a separate channel.
+A store has no operation that edits or deletes an event or changes a limit.
+`decide_approval` is for a person: no tool of the agent leads to it. It never
+consumes an approval; only the launch that uses it does.
 Every change of state leaves an event in the same atomic write.
+See docs/decisions/0008-approvals-decided-through-the-store.md.
 
 The monthly cap follows the UTC calendar month. Callers pass times, never
 months: `month_of` is the only place where a month is derived, for reads and
@@ -311,9 +313,9 @@ class LedgerStore(Protocol):
     """Storage behind the gate. Callers pass in every time: a store reads no clock.
 
     A disc is marked while one of its approval requests is pending, so that a
-    second request can be refused atomically. Deciding an approval is not part
-    of this protocol, but whoever does it must clear that mark in the same
-    atomic write that sets the status, or the disc can never be requested again.
+    second request can be refused atomically. `decide_approval` clears that
+    mark in the same atomic write that sets the status, so the disc can be
+    requested again.
     """
 
     def snapshot(self, at: datetime) -> LedgerSnapshot:
@@ -348,6 +350,23 @@ class LedgerStore(Protocol):
             ApprovalRefExistsError: if `ref` is taken.
             UnknownDiscError: if the disc is not in the ledger.
             PendingApprovalExistsError: if the disc already has a pending request.
+            LedgerTransactionError: if the write was cancelled for another reason.
+        """
+        ...
+
+    def decide_approval(self, ref: str, approved: bool, at: datetime) -> DecidedApproval:
+        """Approve or reject the pending request `ref`, for a person and never for the agent.
+
+        The status of the approval, the removal of the mark on its disc and an
+        "approval_decided" event are written together or not at all. The
+        approval is not consumed: the launch that uses it consumes it.
+
+        Raises:
+            InvalidLedgerInputError: if an argument is malformed.
+            UnknownApprovalError: if no approval has this ref.
+            LedgerDataError: if the disc held for the approval is not an identifier.
+            ApprovalNotPendingError: if the approval is not pending or is consumed.
+            ApprovalDiscMismatchError: if its disc is not marked with exactly this ref.
             LedgerTransactionError: if the write was cancelled for another reason.
         """
         ...

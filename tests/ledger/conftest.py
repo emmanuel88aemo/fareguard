@@ -2,9 +2,10 @@
 
 import os
 import secrets
+import threading
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import boto3
 import pytest
@@ -46,7 +47,12 @@ def table_name() -> str:
 
 @pytest.fixture
 def dynamodb_client(monkeypatch: pytest.MonkeyPatch) -> Iterator["DynamoDBClient"]:
-    """A client for an empty ledger table in moto. Fake credentials keep it away from AWS."""
+    """A client for an empty ledger table in moto. Fake credentials keep it away from AWS.
+
+    DynamoDB isolates a transaction. moto applies one in steps, without a lock, and undoes a
+    cancelled one by restoring a copy of the table, which would also undo a transaction that
+    another thread completed meanwhile. So the transactions of this client run one at a time.
+    """
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
     monkeypatch.delenv("AWS_SESSION_TOKEN", raising=False)
@@ -54,6 +60,14 @@ def dynamodb_client(monkeypatch: pytest.MonkeyPatch) -> Iterator["DynamoDBClient
     with mock_aws():
         client = boto3.client("dynamodb", region_name="us-east-1")
         client.create_table(**_ledger_table(TABLE))
+        one_at_a_time = threading.Lock()
+        transact = client.transact_write_items
+
+        def isolated(**arguments: Any) -> Any:  # noqa: ANN401  # mirrors the client's own signature
+            with one_at_a_time:
+                return transact(**arguments)
+
+        monkeypatch.setattr(client, "transact_write_items", isolated)
         yield client
 
 
