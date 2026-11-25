@@ -6,7 +6,7 @@ import pytest
 
 from fareguard.gate.models import RuleId
 from fareguard.hook.decide import DENIAL_REASONS
-from fareguard.tools.results import reason_for, refusal, usd
+from fareguard.tools.results import Detailed, reason_for, refusal, usd
 
 RULES: tuple[RuleId, ...] = get_args(RuleId.__value__)
 
@@ -33,3 +33,10 @@ def test_refusal_is_json_serialisable() -> None:
 )
 def test_usd_is_a_string_with_two_decimals(amount: Decimal, text: str) -> None:
     assert usd(amount) == text
+
+
+def test_detail_is_kept_beside_the_result_not_in_it() -> None:
+    detailed = Detailed(refusal("R4"), "no approval with ref 'apr-9' exists")
+
+    assert detailed.result == refusal("R4")
+    assert "apr-9" not in json.dumps(detailed.result)

@@ -2,9 +2,11 @@
 
 A result goes back to the model, so it never repeats text the model sent: a
 refusal is a rule id and the fixed sentence of that rule, the same sentence the
-hook gives for it.
+hook gives for it. Why exactly a call was refused is the detail, which is kept
+next to the result for the log and is never part of it.
 """
 
+from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal
 from typing import Literal, TypedDict
 
@@ -12,6 +14,19 @@ from fareguard.gate.models import RuleId
 from fareguard.hook.decide import DENIAL_REASONS
 
 _CENT = Decimal("0.01")
+
+
+@dataclass(frozen=True)
+class Detailed[Result]:
+    """A result for the agent and the detail for the log.
+
+    `detail` is the gate's or the store's own reason, or None when there is
+    none. It may quote a disc id or an approval ref of the call, but only one
+    with the strict shape of an identifier. It is never returned to the agent.
+    """
+
+    result: Result
+    detail: str | None
 
 
 class Refusal(TypedDict):

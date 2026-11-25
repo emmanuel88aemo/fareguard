@@ -7,7 +7,14 @@ import pytest
 from fareguard.gate.models import Approval, Disc, Limits
 from fareguard.ledger.memory import InMemoryLedgerStore
 from fareguard.tools.approval import request_approval
-from fareguard.tools.dispatch import ToolContext, dispatch
+from fareguard.tools.dispatch import (
+    ARGUMENTS_DETAIL,
+    NO_CALL_DETAIL,
+    UNKNOWN_TOOL_DETAIL,
+    ToolContext,
+    ToolResult,
+)
+from fareguard.tools.dispatch import dispatch as dispatch_detailed
 from fareguard.tools.launch import launch_job
 from fareguard.tools.read import list_pending, read_ledger
 from fareguard.tools.results import refusal
@@ -28,6 +35,11 @@ def make_store() -> InMemoryLedgerStore:
 
 def make_context(store: InMemoryLedgerStore | None = None) -> ToolContext:
     return ToolContext(store or make_store(), LIMITS, NOW, lambda: "apr-new")
+
+
+def dispatch(tool_name: object, arguments: object, context: ToolContext) -> ToolResult:
+    """Return what the agent receives: the result without the detail."""
+    return dispatch_detailed(tool_name, arguments, context).result
 
 
 def test_read_ledger_is_routed() -> None:
@@ -136,3 +148,53 @@ def test_text_sent_as_an_argument_does_not_come_back_from_a_later_read_outside_t
 
     assert IDENTIFIER_INJECTION not in json.dumps(dispatch("read_ledger", {}, context))
     assert IDENTIFIER_INJECTION not in json.dumps(dispatch("list_pending", {}, context))
+
+
+def test_read_tools_have_no_detail() -> None:
+    assert dispatch_detailed("read_ledger", {}, make_context()).detail is None
+    assert dispatch_detailed("list_pending", {}, make_context()).detail is None
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments", "detail"),
+    [
+        (None, {}, NO_CALL_DETAIL),
+        ("launch_job", None, NO_CALL_DETAIL),
+        (INJECTION, {}, UNKNOWN_TOOL_DETAIL),
+        ("launch_job", {"disc_id": INJECTION, INJECTION: INJECTION}, ARGUMENTS_DETAIL),
+    ],
+)
+def test_detail_of_a_refused_call_is_a_fixed_sentence(
+    tool_name: object, arguments: object, detail: str
+) -> None:
+    assert dispatch_detailed(tool_name, arguments, make_context()).detail == detail
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments", "detail"),
+    [
+        (
+            "request_approval",
+            {"disc_id": IDENTIFIER_INJECTION},
+            f"disc {IDENTIFIER_INJECTION!r} is not in the ledger snapshot",
+        ),
+        (
+            "launch_job",
+            {"disc_id": IDENTIFIER_INJECTION, "approval_ref": "apr-1"},
+            f"disc {IDENTIFIER_INJECTION!r} is not in the ledger snapshot",
+        ),
+        (
+            "launch_job",
+            {"disc_id": "disc-1", "approval_ref": IDENTIFIER_INJECTION},
+            f"no approval with ref {IDENTIFIER_INJECTION!r} exists",
+        ),
+    ],
+)
+def test_detail_of_a_tool_is_kept_beside_the_result_and_never_in_it(
+    tool_name: str, arguments: object, detail: str
+) -> None:
+    outcome = dispatch_detailed(tool_name, arguments, make_context())
+
+    assert outcome.detail == detail
+    assert IDENTIFIER_INJECTION not in json.dumps(outcome.result)
+    assert detail not in json.dumps(outcome.result)

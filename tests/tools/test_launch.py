@@ -8,7 +8,12 @@ import pytest
 from fareguard.gate.models import Approval, Disc, LedgerSnapshot, Limits, RuleId
 from fareguard.ledger.memory import InMemoryLedgerStore
 from fareguard.ledger.store import Launch, LaunchResult
-from fareguard.tools.launch import LAUNCHED_REASON, LaunchOutcome, launch_job
+from fareguard.tools.launch import (
+    LAUNCHED_REASON,
+    LaunchOutcome,
+    launch_job,
+    launch_job_detailed,
+)
 from fareguard.tools.results import reason_for
 
 NOW = datetime(2026, 11, 25, 10, 0, tzinfo=UTC)
@@ -168,3 +173,36 @@ def test_result_never_repeats_an_argument_and_is_json_serialisable(
     assert disc_id not in text
     assert approval_ref not in text
     assert json.loads(text) == result
+
+
+def test_detail_of_a_launch_is_the_reason_of_the_store() -> None:
+    outcome = launch_job_detailed("disc-1", "apr-1", make_store(), LIMITS, NOW)
+
+    assert outcome.result == {"launched": True, "rule": None, "reason": LAUNCHED_REASON}
+    assert outcome.detail == "launched"
+
+
+def test_detail_of_a_gate_refusal_is_the_reason_of_the_gate_and_stays_out_of_the_result() -> None:
+    outcome = launch_job_detailed("disc-1", IDENTIFIER_INJECTION, make_store(), LIMITS, NOW)
+
+    assert outcome.result == refused("R4")
+    assert outcome.detail == f"no approval with ref {IDENTIFIER_INJECTION!r} exists"
+    assert IDENTIFIER_INJECTION not in json.dumps(outcome.result)
+
+
+def test_detail_of_a_store_refusal_is_the_reason_of_the_store() -> None:
+    store = StaleSnapshotStore([DISC], [APPROVAL])
+    assert launch_job("disc-1", "apr-1", store, LIMITS, NOW)["launched"]
+
+    outcome = launch_job_detailed("disc-1", "apr-1", store, LIMITS, NOW)
+
+    assert outcome.result == refused("R4")
+    assert outcome.detail is not None
+    assert outcome.detail.endswith("covers less than the estimate; nothing changed")
+
+
+def test_detail_never_quotes_text_without_the_shape_of_an_identifier() -> None:
+    outcome = launch_job_detailed(INJECTION, INJECTION, make_store(), LIMITS, NOW)
+
+    assert outcome.detail is not None
+    assert INJECTION not in outcome.detail

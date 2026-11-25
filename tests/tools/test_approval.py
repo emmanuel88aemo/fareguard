@@ -9,11 +9,13 @@ from fareguard.gate.models import Approval, Disc, LedgerSnapshot, Limits
 from fareguard.ledger.memory import InMemoryLedgerStore
 from fareguard.ledger.store import LedgerStore
 from fareguard.tools.approval import (
+    NO_ESTIMATE_DETAIL,
     PENDING_REQUEST_REASON,
     REF_TAKEN_REASON,
     REQUESTED_REASON,
     RequestResult,
     request_approval,
+    request_approval_detailed,
 )
 from fareguard.tools.results import reason_for
 
@@ -151,3 +153,41 @@ def test_result_never_repeats_the_disc_id_and_is_json_serialisable(disc_id: str)
 
     assert disc_id not in json.dumps(result)
     assert json.loads(json.dumps(result)) == result
+
+
+def test_detail_of_a_gate_refusal_is_the_reason_of_the_gate_and_stays_out_of_the_result() -> None:
+    store = InMemoryLedgerStore(DISCS)
+
+    outcome = request_approval_detailed(IDENTIFIER_INJECTION, store, LIMITS, NOW, refs("apr-1"))
+
+    assert outcome.result == R5_REFUSAL
+    assert outcome.detail == f"disc {IDENTIFIER_INJECTION!r} is not in the ledger snapshot"
+    assert IDENTIFIER_INJECTION not in json.dumps(outcome.result)
+
+
+def test_detail_of_a_store_refusal_is_the_message_of_the_store() -> None:
+    store = InMemoryLedgerStore(DISCS)
+    assert request("disc-1", store, "apr-1")["requested"]
+
+    outcome = request_approval_detailed("disc-1", store, LIMITS, NOW, refs("apr-2"))
+
+    assert outcome.result["reason"] == PENDING_REQUEST_REASON
+    assert outcome.detail == "disc 'disc-1' already has a pending approval request"
+
+
+def test_detail_of_a_disc_that_cannot_be_priced_is_a_fixed_sentence() -> None:
+    store = InMemoryLedgerStore(DISCS)
+
+    outcome = request_approval_detailed("disc-empty", store, LIMITS, NOW, refs("apr-1"))
+
+    assert (outcome.result, outcome.detail) == (R5_REFUSAL, NO_ESTIMATE_DETAIL)
+
+
+def test_detail_never_quotes_text_without_the_shape_of_an_identifier() -> None:
+    for ref in ("apr-1", INJECTION):
+        store = InMemoryLedgerStore(DISCS)
+        outcome = request_approval_detailed(INJECTION, store, LIMITS, NOW, refs(ref))
+        malformed_ref = request_approval_detailed("disc-1", store, LIMITS, NOW, refs(INJECTION))
+
+        assert INJECTION not in str(outcome.detail)
+        assert INJECTION not in str(malformed_ref.detail)

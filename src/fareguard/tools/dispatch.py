@@ -8,12 +8,18 @@ from fareguard.gate.evaluate import LAUNCH_JOB, LIST_PENDING, READ_LEDGER, REQUE
 from fareguard.gate.models import Limits
 from fareguard.gate.validation import is_identifier
 from fareguard.ledger.store import LedgerStore
-from fareguard.tools.approval import RequestResult, request_approval
-from fareguard.tools.launch import LaunchOutcome, launch_job
+from fareguard.tools.approval import RequestResult, request_approval_detailed
+from fareguard.tools.launch import LaunchOutcome, launch_job_detailed
 from fareguard.tools.read import LedgerView, PendingList, list_pending, read_ledger
-from fareguard.tools.results import Refusal, refusal
+from fareguard.tools.results import Detailed, Refusal, refusal
 
 type ToolResult = LedgerView | PendingList | RequestResult | LaunchOutcome | Refusal
+
+NO_CALL_DETAIL = "the tool name is not a string or the arguments are not a mapping"
+UNKNOWN_TOOL_DETAIL = "the requested tool does not exist"
+ARGUMENTS_DETAIL = (
+    "the arguments are not exactly those of the tool, each a string with the shape of an identifier"
+)
 
 # The arguments each tool takes. Every one is a string with the shape of an identifier.
 _ARGUMENTS: Mapping[str, tuple[str, ...]] = {
@@ -34,30 +40,34 @@ class ToolContext:
     new_ref: Callable[[], str]
 
 
-def dispatch(tool_name: object, arguments: object, context: ToolContext) -> ToolResult:
+def dispatch(tool_name: object, arguments: object, context: ToolContext) -> Detailed[ToolResult]:
     """Carry out the call of `tool_name` with `arguments`, or refuse it.
 
     `tool_name` is the plain name, without a gateway target. A name that is
     not one of the four tools is refused with R1. A missing name and arguments
     that are not exactly the tool's own, each a string with the shape of an
     identifier, are refused with R5. A refusal repeats nothing from the call.
+
+    The result is for the agent. The detail beside it is for the log only.
     """
     if not isinstance(tool_name, str) or not isinstance(arguments, Mapping):
-        return refusal("R5")
+        return Detailed(refusal("R5"), NO_CALL_DETAIL)
     expected = _ARGUMENTS.get(tool_name)
     if expected is None:
-        return refusal("R1")
+        return Detailed(refusal("R1"), UNKNOWN_TOOL_DETAIL)
     if set(arguments) != set(expected) or not all(is_identifier(arguments[n]) for n in expected):
-        return refusal("R5")
+        return Detailed(refusal("R5"), ARGUMENTS_DETAIL)
     return _run(tool_name, arguments, context)
 
 
-def _run(tool_name: str, arguments: Mapping[str, str], context: ToolContext) -> ToolResult:
+def _run(
+    tool_name: str, arguments: Mapping[str, str], context: ToolContext
+) -> Detailed[ToolResult]:
     store, limits, now = context.store, context.limits, context.now
     if tool_name == READ_LEDGER:
-        return read_ledger(store, limits, now)
+        return Detailed(read_ledger(store, limits, now), None)
     if tool_name == LIST_PENDING:
-        return list_pending(store)
+        return Detailed(list_pending(store), None)
     if tool_name == REQUEST_APPROVAL:
-        return request_approval(arguments["disc_id"], store, limits, now, context.new_ref)
-    return launch_job(arguments["disc_id"], arguments["approval_ref"], store, limits, now)
+        return request_approval_detailed(arguments["disc_id"], store, limits, now, context.new_ref)
+    return launch_job_detailed(arguments["disc_id"], arguments["approval_ref"], store, limits, now)
