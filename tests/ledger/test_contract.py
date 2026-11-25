@@ -521,8 +521,12 @@ def decide_together(store: LedgerStore, ref: str) -> list[DecisionOutcome]:
         return list(pool.map(attempt, [True, False]))
 
 
-def test_two_concurrent_decisions_on_one_request_only_one_wins(make_store: MakeStore) -> None:
-    """Race an approval against a rejection, several times, so that some rounds overlap."""
+def test_two_concurrent_decisions_on_one_request_at_most_one_wins(make_store: MakeStore) -> None:
+    """Race an approval against a rejection, several times: at most one wins, never both.
+
+    DynamoDB may cancel both colliding transactions as conflicts, so a round can
+    have no winner. The ledger must then be as it was: nothing half decided.
+    """
     discs = [Disc(f"disc-{number}", 600) for number in range(1, RACE_ROUNDS + 1)]
     requests = [
         approval(ref=f"apr-{number}", disc_id=f"disc-{number}", status="pending")
@@ -530,21 +534,37 @@ def test_two_concurrent_decisions_on_one_request_only_one_wins(make_store: MakeS
     ]
     store = make_store(discs, requests)
 
-    for number, request in enumerate(requests, start=1):
+    for request in requests:
         outcomes = decide_together(store, request.ref)
 
-        (winner,) = [o for o in outcomes if isinstance(o, DecidedApproval)]
+        winners = [o for o in outcomes if isinstance(o, DecidedApproval)]
+        refused = [o for o in outcomes if isinstance(o, ApprovalNotPendingError)]
         held = {a.ref: a for a in store.snapshot(AT).approvals}[request.ref]
-        assert (held.status, held.consumed) == (winner.status, False)
-        events = store.recent_events(100)
-        assert len(events) == number
-        (event,) = [e for e in events if e.event_id == f"approval_decided:{request.ref}"]
-        assert event.detail == {
-            "disc_id": request.disc_id,
-            "approval_ref": request.ref,
-            "decision": winner.status,
-        }
-        assert len(store.pending_approvals()) == RACE_ROUNDS - number
+        logged = [
+            event.detail
+            for event in store.recent_events(100)
+            if event.event_id == f"approval_decided:{request.ref}"
+        ]
+        retry_ref, retry_at = f"{request.ref}-retry", AT + timedelta(hours=1)
+        assert len(winners) <= 1
+        assert held.consumed is False
+        if winners:
+            decision = winners[0].status
+            assert held.status == decision
+            assert logged == [
+                {"disc_id": request.disc_id, "approval_ref": request.ref, "decision": decision}
+            ]
+            # The mark is cleared: the disc accepts a new request.
+            store.create_approval_request(request.disc_id, ESTIMATE, retry_ref, retry_at)
+        else:
+            # Nobody decided, so nobody can have been told that somebody else did.
+            assert refused == []
+            assert held == request
+            assert logged == []
+            # The mark is unchanged: the disc still refuses a new request.
+            with pytest.raises(PendingApprovalExistsError):
+                store.create_approval_request(request.disc_id, ESTIMATE, retry_ref, retry_at)
+        assert (request in store.pending_approvals()) is not bool(winners)
 
 
 def test_recent_events_are_newest_first_and_limited(make_store: MakeStore) -> None:

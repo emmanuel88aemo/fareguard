@@ -192,13 +192,18 @@ def test_every_expression_is_accepted_without_a_reserved_word_error(
     assert store.record_launch(Launch("disc-2", "apr-4", ESTIMATE, AT), LIMITS).launched is True
 
 
-def test_same_approval_launched_from_two_threads_is_recorded_once(
+def test_same_approval_launched_from_two_threads_is_recorded_at_most_once(
     make_aws_store: MakeStore,
 ) -> None:
-    """Race two launches for one approval, five times, so that some rounds really overlap."""
+    """Race two launches for one approval, five times: at most one is recorded, never both.
+
+    DynamoDB may cancel both colliding transactions as conflicts, so a round can
+    record no launch. The approval is then unconsumed and no spend was added.
+    """
     refs = [f"apr-{number}" for number in range(1, RACE_ROUNDS + 1)]
     approvals = [dataclasses.replace(APPROVAL, ref=ref, approved_usd=RACE_ESTIMATE) for ref in refs]
     store = make_aws_store(DISCS, approvals)
+    launched: dict[str, bool] = {}
 
     for number, ref in enumerate(refs, start=1):
         first = Launch("disc-1", ref, RACE_ESTIMATE, AT + timedelta(minutes=number))
@@ -207,13 +212,19 @@ def test_same_approval_launched_from_two_threads_is_recorded_once(
 
         outcomes = launch_together(store, [first, second], LIMITS)
 
-        assert len(recorded(outcomes)) == 1
+        assert len(recorded(outcomes)) <= 1
         assert refusal_rules(outcomes) <= {"R4"}
+        launched[ref] = bool(recorded(outcomes))
+        # Nothing was launched, so nothing can have been refused for a consumed approval.
+        assert launched[ref] or refusal_rules(outcomes) == set()
+        spent = RACE_ESTIMATE * sum(launched.values())
         snapshot = store.snapshot(AT)
-        assert [a.consumed for a in snapshot.approvals] == [r <= ref for r in refs]
-        assert snapshot.disc_spend_usd == {"disc-1": RACE_ESTIMATE * number}
-        assert snapshot.month_spend_usd == RACE_ESTIMATE * number
-        assert [event.type for event in events(store)] == ["job_launched"] * number
+        assert [a.consumed for a in snapshot.approvals] == [launched.get(r, False) for r in refs]
+        assert snapshot.disc_spend_usd.get("disc-1", Decimal("0")) == spent
+        assert snapshot.month_spend_usd == spent
+        assert [event.detail["approval_ref"] for event in events(store)] == [
+            r for r in reversed(refs) if launched.get(r)
+        ]
 
 
 def test_twenty_concurrent_launches_never_push_the_spend_over_the_monthly_cap(
