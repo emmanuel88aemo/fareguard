@@ -41,8 +41,10 @@ from fareguard.ledger.errors import (
 LAUNCH_JOB = "launch_job"
 JOB_LAUNCHED = "job_launched"
 APPROVAL_REQUESTED = "approval_requested"
+APPROVAL_DECIDED = "approval_decided"
 PENDING = "pending"
 APPROVED = "approved"
+REJECTED = "rejected"
 _ZERO = Decimal("0")
 _CENT = Decimal("0.01")
 NO_SPEND_USD = Decimal("0.00")
@@ -174,6 +176,59 @@ class ApprovalRequest:
             "approved_usd": self.approved_usd,
         }
         return _event(self.at, APPROVAL_REQUESTED, self.ref, detail)
+
+
+@dataclass(frozen=True)
+class DecidedApproval:
+    """The outcome of `decide_approval`: the approval, its disc and the status it now has."""
+
+    ref: str
+    disc_id: str
+    status: str
+
+
+@dataclass(frozen=True)
+class ApprovalDecision:
+    """The validated arguments of `decide_approval`.
+
+    `approved` must be a bool: a value that is merely truthy approves nothing.
+
+    Raises:
+        InvalidLedgerInputError: if an argument is malformed.
+    """
+
+    ref: str
+    approved: bool
+    at: datetime
+
+    def __post_init__(self) -> None:
+        """Validate every argument."""
+        _require_identifier("ref", self.ref)
+        _require_instant(self.at)
+        if type(self.approved) is not bool:
+            raise InvalidLedgerInputError("approved", "True or False")
+
+    @property
+    def status(self) -> str:
+        """The status this decision gives the approval."""
+        return APPROVED if self.approved else REJECTED
+
+    def outcome(self, disc_id: str) -> DecidedApproval:
+        """Return what `decide_approval` returns once the decision is written."""
+        return DecidedApproval(self.ref, disc_id, self.status)
+
+    def event(self, disc_id: str) -> LedgerEvent:
+        """Return the "approval_decided" event written with the decision.
+
+        `disc_id` is the disc the ledger holds for the approval; no caller supplies it.
+
+        Raises:
+            LedgerDataError: if the held disc id does not have the shape of an identifier.
+        """
+        if not is_identifier(disc_id):
+            raise LedgerDataError("disc_id")
+        detail: _Detail = {"disc_id": disc_id, "approval_ref": self.ref, "decision": self.status}
+        return _event(self.at, APPROVAL_DECIDED, self.ref, detail)
 
 
 @dataclass(frozen=True)
