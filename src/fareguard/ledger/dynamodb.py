@@ -16,6 +16,7 @@ from fareguard.ledger.store import (
     APPROVED,
     LAUNCH_JOB,
     LAUNCHED,
+    NO_SPEND_USD,
     PENDING,
     ApprovalRequest,
     Launch,
@@ -69,11 +70,9 @@ class DynamoLedgerStore:
         return LedgerSnapshot(
             discs=tuple(items.read_disc(item) for item in discs),
             approvals=self._approvals(),
-            month_spend_usd=Decimal("0")
-            if spend is None
-            else items.read_number(spend, "spent_usd"),
+            month_spend_usd=NO_SPEND_USD if spend is None else items.read_usd(spend, "spent_usd"),
             disc_spend_usd={
-                items.read_text(item, "sk"): items.read_number(item, "spent_usd")
+                items.read_text(item, "sk"): items.read_usd(item, "spent_usd")
                 for item in discs
                 if "spent_usd" in item
             },
