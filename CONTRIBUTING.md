@@ -177,15 +177,20 @@ Rules for files:
 
 ## Deployment
 
-Deployment runs from GitHub Actions, never from a laptop:
+For now the owner deploys by hand, from a laptop:
 
-- The workflow authenticates to AWS with GitHub OIDC and a short-lived role. No long-lived
-  access keys are stored as secrets.
-- `terraform plan` runs on every pull request that touches `infra/`.
-- `terraform apply` runs only from `main`, through a protected environment that requires
-  manual approval.
+- The owner runs `terraform plan` and `terraform apply`, following `infra/README.md`. Nobody
+  else deploys, and no workflow does.
+- The identity used is dedicated to this project and limited to it. It is not a personal
+  administrator identity.
+- CI formats and validates Terraform on every pull request. It holds no AWS credentials, so
+  it cannot plan or apply.
 
-The deployment workflow is added together with the first Terraform code.
+**Planned, not built yet:** deployment from GitHub Actions, authenticated with GitHub OIDC and
+a short-lived role instead of stored access keys, with `terraform plan` on every pull request
+that touches `infra/` and `terraform apply` only from `main`, through a protected environment
+that requires manual approval. Until that workflow exists, the list above is how deployment
+works.
 
 ## Local setup
 
