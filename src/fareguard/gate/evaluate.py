@@ -1,6 +1,6 @@
 """Allow or deny one proposed tool call against the rules R1 to R5."""
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -14,6 +14,11 @@ from fareguard.gate.models import (
     ToolCall,
 )
 from fareguard.gate.pricing import PricingError, estimate_cost
+from fareguard.gate.validation import (
+    are_well_formed_limits,
+    is_well_formed_call,
+    is_well_formed_snapshot,
+)
 
 READ_LEDGER = "read_ledger"
 LIST_PENDING = "list_pending"
@@ -46,7 +51,7 @@ def evaluate(call: ToolCall, snapshot: LedgerSnapshot, limits: Limits) -> Decisi
     Every denial names the rule that failed. The cost of a job is always
     computed from the disc's duration in the snapshot, never taken from the call.
     """
-    if not _is_well_formed_call(call):
+    if not is_well_formed_call(call):
         return _deny("R5", "the tool call must have a string name and a mapping of arguments")
     if call.name not in _TOOLS:
         tools = ", ".join(sorted(_TOOLS))
@@ -57,7 +62,7 @@ def evaluate(call: ToolCall, snapshot: LedgerSnapshot, limits: Limits) -> Decisi
 def _evaluate_known_tool(call: ToolCall, snapshot: LedgerSnapshot, limits: Limits) -> Decision:
     if call.name in _READ_TOOLS:
         return _evaluate_read(call)
-    if not _is_well_formed_snapshot(snapshot):
+    if not is_well_formed_snapshot(snapshot):
         return _deny("R5", "the ledger snapshot is malformed, so no spend can be checked")
     if call.name == REQUEST_APPROVAL:
         return _evaluate_request_approval(call, snapshot)
@@ -83,7 +88,7 @@ def _evaluate_launch_job(call: ToolCall, snapshot: LedgerSnapshot, limits: Limit
     arguments = _string_arguments(call.arguments, _LAUNCH_JOB_ARGUMENTS)
     if arguments is None:
         return _deny_arguments(call, _LAUNCH_JOB_ARGUMENTS)
-    if not _are_well_formed_limits(limits):
+    if not are_well_formed_limits(limits):
         return _deny("R5", "the limits are malformed, so no spend can be checked")
     disc = _find_disc(snapshot, arguments["disc_id"])
     if disc is None:
@@ -204,83 +209,4 @@ def _describe(arguments: Mapping[str, object]) -> str:
         return "no arguments"
     return ", ".join(
         sorted(f"{key!r} ({type(value).__name__})" for key, value in arguments.items())
-    )
-
-
-def _is_amount(value: object) -> bool:
-    """Whether `value` is usable as an amount of money: a finite Decimal that is not negative."""
-    return isinstance(value, Decimal) and value.is_finite() and value >= _ZERO
-
-
-def _are_unique(values: Iterable[str]) -> bool:
-    listed = list(values)
-    return len(set(listed)) == len(listed)
-
-
-def _is_well_formed_call(call: object) -> bool:
-    return (
-        isinstance(call, ToolCall)
-        and isinstance(call.name, str)
-        and isinstance(call.arguments, Mapping)
-    )
-
-
-def _is_well_formed_disc(disc: object) -> bool:
-    # bool is a subclass of int, so an exact type check keeps True from counting as one second.
-    return (
-        isinstance(disc, Disc)
-        and isinstance(disc.disc_id, str)
-        and type(disc.duration_seconds) is int
-    )
-
-
-def _is_well_formed_approval(approval: object) -> bool:
-    return (
-        isinstance(approval, Approval)
-        and all(
-            isinstance(text, str)
-            for text in (approval.ref, approval.action, approval.disc_id, approval.status)
-        )
-        and isinstance(approval.consumed, bool)
-        and _is_amount(approval.approved_usd)
-    )
-
-
-def _has_well_formed_records(snapshot: LedgerSnapshot) -> bool:
-    """Whether discs and approvals are typed records with unambiguous identifiers."""
-    return (
-        isinstance(snapshot.discs, tuple)
-        and isinstance(snapshot.approvals, tuple)
-        and all(_is_well_formed_disc(disc) for disc in snapshot.discs)
-        and all(_is_well_formed_approval(approval) for approval in snapshot.approvals)
-        and _are_unique(disc.disc_id for disc in snapshot.discs)
-        and _are_unique(approval.ref for approval in snapshot.approvals)
-    )
-
-
-def _has_well_formed_spend(snapshot: LedgerSnapshot) -> bool:
-    return (
-        _is_amount(snapshot.month_spend_usd)
-        and isinstance(snapshot.disc_spend_usd, Mapping)
-        and all(
-            isinstance(disc_id, str) and _is_amount(spent_usd)
-            for disc_id, spent_usd in snapshot.disc_spend_usd.items()
-        )
-    )
-
-
-def _is_well_formed_snapshot(snapshot: object) -> bool:
-    return (
-        isinstance(snapshot, LedgerSnapshot)
-        and _has_well_formed_records(snapshot)
-        and _has_well_formed_spend(snapshot)
-    )
-
-
-def _are_well_formed_limits(limits: object) -> bool:
-    return (
-        isinstance(limits, Limits)
-        and _is_amount(limits.max_usd_per_disc)
-        and _is_amount(limits.monthly_cap_usd)
-        and isinstance(limits.usd_per_minute, Decimal)
     )
