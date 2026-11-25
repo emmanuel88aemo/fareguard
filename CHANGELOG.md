@@ -76,6 +76,11 @@ All notable changes to this project are recorded here. The format follows
   It cannot delete an item or update an event, whatever the code does.
 - CI job that checks `terraform fmt` and runs `terraform validate` in both directories,
   without AWS credentials.
+- Terraform for the two Lambda functions, `fareguard-<env>-hook` and `fareguard-<env>-tools`,
+  with their environment variables; the three limits are Terraform variables. Both run one
+  zip that Terraform builds from `src/` with no dependency in it: `boto3` comes from the
+  runtime (decision record 0004). It passes `terraform validate` only: the functions have
+  not been planned, applied or invoked in AWS.
 
 ### Fixed
 
