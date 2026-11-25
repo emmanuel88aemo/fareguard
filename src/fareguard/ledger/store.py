@@ -12,6 +12,10 @@ Every change of state leaves an event in the same atomic write.
 The monthly cap follows the UTC calendar month. Callers pass times, never
 months: `month_of` is the only place where a month is derived, for reads and
 for writes alike.
+
+Every store returns an amount of USD in whole cents with two decimal places,
+however it keeps the number. A held amount that is not a whole number of cents
+is a LedgerDataError; it is never rounded.
 """
 
 from collections.abc import Iterable, Mapping
