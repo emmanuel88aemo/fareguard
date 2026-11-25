@@ -12,3 +12,11 @@ updates:
       interval: weekly
     commit-message:
       prefix: build
+  - package-ecosystem: terraform
+    directories:
+      - /infra/bootstrap
+      - /infra/main
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
