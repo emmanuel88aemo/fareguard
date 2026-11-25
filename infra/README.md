@@ -27,8 +27,11 @@ No workflow plans or applies this yet: a person runs the commands below.
 | AgentCore Gateway | `fareguard-<env>-gateway` |
 | Target of the gateway, the tools function | `fareguard` |
 | Bedrock Guardrail and one published version of it | `fareguard-<env>-guardrail` |
+| Execution role of the harness | `fareguard-<env>-harness` |
 
-It creates no harness yet, so nothing calls the gateway or invokes the hook function.
+It does not create the harness. A person creates it with `scripts/create_harness.py`, from
+the outputs of this stack; see [`harness/README.md`](../harness/README.md). Until then
+nothing calls the gateway or invokes the hook function.
 
 ### The Lambda functions
 
@@ -73,8 +76,8 @@ There is no `pip install` and no build script: plan and apply are the whole depl
 ### The gateway
 
 The gateway speaks MCP and authorises its callers with IAM (`AWS_IAM`): a caller signs its
-request and needs `bedrock-agentcore:InvokeGateway` on this gateway. No role has that
-permission yet. The reasons are in
+request and needs `bedrock-agentcore:InvokeGateway` on this gateway. The execution role of
+the harness has that permission and no other role does. The reasons are in
 [decision record 0005](../docs/decisions/0005-gateway-with-iam-inbound-and-a-role-for-one-function.md).
 
 It has one target, named `fareguard`, which is the tools function, invoked with the
@@ -123,9 +126,9 @@ figures.
 
 ### What the roles may do
 
-The two Lambda roles are trusted by `lambda.amazonaws.com` only. The gateway role is trusted
-by `bedrock-agentcore.amazonaws.com` only, and only for resources of this account. Each has
-one inline policy and no managed policy; Terraform removes any other policy it finds on them.
+The two Lambda roles are trusted by `lambda.amazonaws.com` only. The gateway role and
+the execution role of the harness are trusted by `bedrock-agentcore.amazonaws.com` only, and
+only for resources of this account. Each has one inline policy and no managed policy; Terraform removes any other policy it finds on them.
 
 | Role | Actions | On |
 |---|---|---|
@@ -137,6 +140,47 @@ one inline policy and no managed policy; Terraform removes any other policy it f
 | tools | `dynamodb:UpdateItem` | items of the ledger table whose partition key is `DISC`, `APPROVAL` or `SPEND` |
 | tools | `logs:CreateLogStream`, `logs:PutLogEvents` | the streams of its own log group |
 | gateway | `lambda:InvokeFunction` | the tools function |
+| harness | `lambda:InvokeFunction` | the hook function |
+| harness | `bedrock-agentcore:InvokeGateway` | the gateway |
+| harness | `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream` | Amazon Nova 2 Lite: the foundation model in any region and its US inference profile in this account |
+| harness | what AgentCore needs to run a harness | see below |
+
+### The execution role of the harness
+
+The harness assumes this role to call the model, the gateway and the hook function. The
+first three rows above are what the agent needs. The rest is the minimum policy the
+AgentCore documentation gives for an execution role ("Security and access controls", sample
+execution role policy), with each statement limited to a resource where the action allows
+it:
+
+| Statement | Actions | On |
+|---|---|---|
+| `CreateAndDescribeOwnLogGroup` | `logs:CreateLogGroup`, `logs:DescribeLogStreams` | log groups named `/aws/bedrock-agentcore/runtimes/*` |
+| `WriteOwnLog` | `logs:CreateLogStream`, `logs:PutLogEvents` | the streams of those log groups |
+| `GetOwnWorkloadAccessToken` | `bedrock-agentcore:GetWorkloadAccessToken`, `GetWorkloadAccessTokenForJWT` | the default workload identity directory and the identities named `harness_fareguard_<env>-*` |
+
+The log group of a harness is named after the runtime that backs it, whose id exists only
+once the harness is created. Terraform therefore does not create that log group and cannot
+name it exactly: AgentCore creates it, with no retention period set.
+
+Six statements are not limited to one resource:
+
+| Statement | Actions | Resource | Why it is a wildcard |
+|---|---|---|---|
+| `InvokeNova2Lite` | the two `bedrock:Invoke*` actions | `foundation-model/amazon.nova-2-lite-v1:0` in region `*` | An inference profile sends a request to the model in one of several regions, and Bedrock authorises the model in the region it chose. The model is still one model. |
+| `GetTokenToPullTheManagedImage` | `ecr-public:GetAuthorizationToken`, `sts:GetServiceBearerToken` | `*` | A harness pulls its managed container image from Amazon ECR Public at the start of each session. A token is not issued for one repository, so neither action supports a resource. |
+| `DescribeLogGroups` | `logs:DescribeLogGroups` | every log group of this account and region | The action is authorised against the groups it may list. It reads names only. |
+| `PutLogResourcePolicy` | `logs:PutResourcePolicy` | `*` | The action supports no resource. AgentCore uses it to let the delivery of spans write to CloudWatch Logs. It is the widest grant of the role: a resource policy of CloudWatch Logs can let an AWS service write to log groups of the account. |
+| `WriteTraces` | `xray:PutTraceSegments`, `PutTelemetryRecords`, `GetSamplingRules`, `GetSamplingTargets` | `*` | The X-Ray actions support no resource. |
+| `PublishMetrics` | `cloudwatch:PutMetricData` | `*`, only in the namespace `bedrock-agentcore` | The action supports no resource; the condition on the namespace is the limit. |
+
+Which of these a harness fails without has not been tested: the stack has not been applied
+with this role, and no harness has been created.
+
+The role is not a boundary around the model's instructions: whoever may call
+`InvokeHarness` can replace the model, the prompt and the tools for one call. It is a
+boundary around what any such call can reach: one model, one gateway, one function. See
+[decision record 0007](../docs/decisions/0007-harness-with-a-pinned-model-and-no-built-in-tools.md).
 
 ## Before you start
 
@@ -188,12 +232,17 @@ After changing `backend.hcl`, run `terraform init -reconfigure -backend-config=b
 terraform plan -out=tfplan
 ```
 
-Read the plan. The first one creates 22 resources and destroys none. It also writes the zip
+Read the plan. The first one creates 26 resources and destroys none. It also writes the zip
 of the functions, so apply the plan from the same checkout that made it.
 
 On a stack that was applied before the guardrail existed, the plan that adds it replaces
 the inline policy of the hook role, because the policy has a new name. Expect that one
 resource to be destroyed and created again, and no other to be destroyed.
+
+On a stack that was applied before the execution role of the harness existed, the plan adds
+the role, its policy and the two resources that keep its list of policies exclusive. It also
+updates both Lambda functions, because the zip now holds the module `fareguard.harness`,
+which neither function imports.
 
 ## 4. Apply
 
@@ -204,9 +253,15 @@ terraform output
 
 `terraform apply tfplan` applies exactly the plan you read and asks no question.
 
+The outputs `harness_name`, `harness_execution_role_arn`, `gateway_arn` and
+`hook_function_arn` are what `scripts/create_harness.py` reads to create the harness.
+
 ## 5. Destroy
 
-`main/` first. **This deletes the ledger table and everything in it.**
+If a harness was created, delete it first: it is not in the state, and it would keep using
+a role and a gateway that no longer exist. See [`harness/README.md`](../harness/README.md).
+
+Then `main/`. **This deletes the ledger table and everything in it.**
 
 ```bash
 cd infra/main
@@ -238,5 +293,6 @@ cd ../main && terraform init -backend=false && terraform validate
 
 `validate` checks that the configuration is consistent. It does not build the zip, and it
 does not check that AWS accepts the configuration, that the policies grant what the code
-needs, that the functions start, that the gateway reaches the tools function or that the
-guardrail blocks anything; only a plan and an apply show that.
+needs, that the functions start, that the gateway reaches the tools function, that the
+guardrail blocks anything or that AgentCore can run a harness with the execution role; only
+a plan and an apply show that.

@@ -113,6 +113,33 @@ All notable changes to this project are recorded here. The format follows
   version (decision record 0006). The guardrail is a second layer: no rule depends on it.
   It passes `terraform validate` only: the guardrail has not been planned, applied or
   called in AWS, and no harness invokes the hook yet.
+- Decision record 0007: the harness states its model, its tools, its memory, its hooks and
+  its limits and relies on no default of the service. The configuration is a default, not a
+  security boundary: `InvokeHarness` can replace the model, the system prompt, the tools,
+  the allowed tools and the limits per call, and only the hooks cannot be overridden. The
+  rules rest on the hooks and on IAM.
+- Terraform for the execution role of the harness, `fareguard-<env>-harness`, trusted by
+  AgentCore for this account only. It may invoke the hook function, the gateway and one
+  model, Amazon Nova 2 Lite, and holds the minimum policy the AgentCore documentation gives
+  for an execution role: the pull of the managed image, logs, traces, metrics and the
+  workload identity. `infra/README.md` lists the statements that are wildcards and why. New
+  outputs: `harness_name` and `harness_execution_role_arn`. It passes `terraform validate`
+  only: the role has not been planned or applied in AWS.
+- `fareguard.harness.config.build_harness_config`, a pure function that builds the arguments
+  of `CreateHarness`. It pins the model to `us.amazon.nova-2-lite-v1:0` and refuses any
+  other, offers the gateway as the only tool source, allows exactly the four selectors
+  `@fareguard/fareguard___<tool>` and therefore no built-in tool, disables memory and
+  registers the hook on `before_invocation`, `before_tool_call` and `after_tool_call` with
+  `failureMode` `deny`. Its output is checked against the `CreateHarness` shape of `boto3`.
+- `harness/system_prompt.md`, the instructions of the dispatcher: four tools, approval
+  before launch, no attempt to change a limit or a rule, and tool output treated as data.
+- `fareguard.harness.stream`, which reads the event stream of `InvokeHarness` into the
+  reply, the tool calls, the hook decisions, the stop reasons and the errors, word for word.
+- `scripts/create_harness.py` and `scripts/invoke_harness.py`, which a person runs; see
+  `harness/README.md`. The first reads the ARNs from `terraform output`, the second sends
+  one message under a runtime session id and prints an error exactly as AWS returned it.
+  Both have `--dry-run`. Neither has been run: no harness exists yet, and whether a harness
+  accepts Amazon Nova 2 Lite is not confirmed.
 
 ### Fixed
 
