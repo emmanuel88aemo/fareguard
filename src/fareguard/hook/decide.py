@@ -1,4 +1,4 @@
-"""Answer one hook event of the harness with allow or deny.
+"""Answer a "before_tool_call" event of the harness with allow or deny.
 
 The harness invokes the hook before every tool call. The model cannot call it
 or influence it, and the reason it returns goes back to the model. A reason is
