@@ -72,3 +72,13 @@ output "guardrail_version" {
   description = "Published version of the guardrail the hook applies, the value of FAREGUARD_GUARDRAIL_VERSION."
   value       = aws_bedrock_guardrail_version.hook.version
 }
+
+output "harness_name" {
+  description = "Name the harness is created with: the name prefix with underscores, because a harness name allows no hyphen."
+  value       = local.harness_name
+}
+
+output "harness_execution_role_arn" {
+  description = "ARN of the execution role of the harness."
+  value       = aws_iam_role.harness.arn
+}
