@@ -35,7 +35,7 @@ def tool_names(runs: Iterable[HarnessRun]) -> tuple[str, ...]:
 def foreign_tool_calls(run: HarnessRun) -> tuple[str, ...]:
     """Return the names of the calls of `run` that are not one of the four gateway tools.
 
-    A name is compared without its gateway target, as the hook compares it.
+    A name is compared as the hook compares it: only under its exact gateway name.
     """
     return tuple(
         shown(call.name)

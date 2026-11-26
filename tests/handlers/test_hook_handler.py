@@ -90,7 +90,9 @@ def put(client: "DynamoDBClient", pk: str, sk: str, **attributes: Any) -> None: 
     client.put_item(TableName=TABLE, Item={"pk": {"S": pk}, "sk": {"S": sk}, **attributes})
 
 
-def make_event(tool: str = "launch_job", tool_input: object = LAUNCH_INPUT) -> dict[str, object]:
+def make_event(
+    tool: str = "fareguard___launch_job", tool_input: object = LAUNCH_INPUT
+) -> dict[str, object]:
     return {
         "hookEventId": "evt-1",
         "name": "fareguard-hook",
@@ -121,7 +123,7 @@ def test_approved_launch_within_caps_is_allowed(capsys: pytest.CaptureFixture[st
             "hookEventId": "evt-1",
             "sessionId": "session-1",
             "tool": "launch_job",
-            "raw_tool": "launch_job",
+            "raw_tool": "fareguard___launch_job",
             "allowed": True,
             "rule": None,
             "detail": "allowed",
@@ -131,22 +133,22 @@ def test_approved_launch_within_caps_is_allowed(capsys: pytest.CaptureFixture[st
 
 
 @pytest.mark.usefixtures("table")
-def test_prefixed_tool_name_is_allowed() -> None:
-    answer = lambda_handler(make_event("fareguard-tools___launch_job"), None)
+def test_exact_gateway_name_is_allowed() -> None:
+    answer = lambda_handler(make_event("fareguard___launch_job"), None)
 
     assert answer["decision"] == "allow"
 
 
 @pytest.mark.usefixtures("table")
 def test_answer_can_be_returned_to_the_harness_as_json() -> None:
-    answer = lambda_handler(make_event("read_ledger", {}), None)
+    answer = lambda_handler(make_event("fareguard___read_ledger", {}), None)
 
     assert json.loads(json.dumps(answer)) == {"decision": "allow", "reason": "allowed"}
 
 
 @pytest.mark.usefixtures("table")
 def test_unknown_tool_is_denied_with_r1() -> None:
-    answer = lambda_handler(make_event("delete_ledger", {}), None)
+    answer = lambda_handler(make_event("fareguard___delete_ledger", {}), None)
 
     assert answer == {"decision": "deny", "reason": DENIAL_REASONS["R1"]}
 
@@ -204,13 +206,13 @@ def test_missing_environment_variable_denies_with_r5(
 ) -> None:
     monkeypatch.delenv(variable)
 
-    assert lambda_handler(make_event("read_ledger", {}), None) == R5_DENIAL
+    assert lambda_handler(make_event("fareguard___read_ledger", {}), None) == R5_DENIAL
     assert logged(capsys) == [
         {
             "hookEventId": "evt-1",
             "sessionId": "session-1",
             "tool": "read_ledger",
-            "raw_tool": "read_ledger",
+            "raw_tool": "fareguard___read_ledger",
             "allowed": False,
             "rule": "R5",
             "detail": None,
@@ -291,15 +293,17 @@ def test_client_store_and_limits_are_built_once_per_container(
     monkeypatch.setattr(boto3, "client", count)
 
     for _ in range(3):
-        assert lambda_handler(make_event("read_ledger", {}), None)["decision"] == "allow"
+        assert (
+            lambda_handler(make_event("fareguard___read_ledger", {}), None)["decision"] == "allow"
+        )
 
     assert built == ["dynamodb"]
 
 
 @pytest.mark.usefixtures("table")
 def test_each_decision_is_logged_as_one_json_line(capsys: pytest.CaptureFixture[str]) -> None:
-    lambda_handler(make_event("read_ledger", {}), None)
-    lambda_handler(make_event("delete_ledger", {}), None)
+    lambda_handler(make_event("fareguard___read_ledger", {}), None)
+    lambda_handler(make_event("fareguard___delete_ledger", {}), None)
 
     lines = capsys.readouterr().out.splitlines()
     assert len(lines) == 2
@@ -307,7 +311,9 @@ def test_each_decision_is_logged_as_one_json_line(capsys: pytest.CaptureFixture[
 
 
 @pytest.mark.usefixtures("table")
-@pytest.mark.parametrize("tool", ["launch_job", "request_approval", "delete_ledger"])
+@pytest.mark.parametrize(
+    "tool", ["fareguard___launch_job", "fareguard___request_approval", "fareguard___delete_ledger"]
+)
 def test_log_never_contains_argument_values(tool: str, capsys: pytest.CaptureFixture[str]) -> None:
     tool_input = {"disc_id": "disc-secret-7", "approval_ref": "apr-secret-9", "note": INJECTION}
 
@@ -324,8 +330,8 @@ def test_log_never_contains_argument_values(tool: str, capsys: pytest.CaptureFix
     ("tool", "tool_input"),
     [
         (INJECTION, {}),
-        ("launch_job", {"disc_id": INJECTION, "approval_ref": "apr-1"}),
-        ("launch_job", {"disc_id": "disc-1", "approval_ref": INJECTION}),
+        ("fareguard___launch_job", {"disc_id": INJECTION, "approval_ref": "apr-1"}),
+        ("fareguard___launch_job", {"disc_id": "disc-1", "approval_ref": INJECTION}),
     ],
 )
 def test_reason_never_contains_text_from_the_event(tool: str, tool_input: object) -> None:
@@ -339,7 +345,7 @@ def test_reason_never_contains_text_from_the_event(tool: str, tool_input: object
 def test_detail_and_raw_tool_are_logged_but_never_returned(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    tool = "fareguard-tools___launch_job"
+    tool = "fareguard___launch_job"
     tool_input = {"disc_id": "disc-1", "approval_ref": "apr-9"}
 
     answer = lambda_handler(make_event(tool, tool_input), None)

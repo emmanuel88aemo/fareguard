@@ -34,8 +34,8 @@ class ToolRecord(TypedDict):
     """One call as it is logged. It is never returned to the agent.
 
     `raw_tool` is the tool name exactly as it arrived, cut to
-    MAX_RAW_TOOL_LENGTH characters, and `tool` is the same without its gateway
-    target. `rule` is the rule of a refusal, or None. `detail` is the reason
+    MAX_RAW_TOOL_LENGTH characters, and `tool` is what `normalise_tool_name`
+    makes of it. `rule` is the rule of a refusal, or None. `detail` is the reason
     of the gate or of the store, or None; it may quote a disc id or an approval
     ref of the call, but only one with the strict shape of an identifier, and
     no other argument text is recorded. `error` is the class name of an
