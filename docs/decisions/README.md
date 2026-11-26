@@ -16,3 +16,4 @@ Copy `0000-template.md` to start a new record.
 | [0007](0007-harness-with-a-pinned-model-and-no-built-in-tools.md) | Harness with a pinned model and no built-in tools | Accepted |
 | [0008](0008-approvals-decided-through-the-store.md) | Approvals decided through the store | Accepted |
 | [0009](0009-seed-and-reset-outside-the-store.md) | Seed and reset outside the store | Accepted |
+| [0010](0010-denied-topic-about-tampering-and-planted-event-on-request.md) | Denied topic about tampering, and planted event on request | Accepted |
