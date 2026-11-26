@@ -183,6 +183,20 @@ All notable changes to this project are recorded here. The format follows
   not questions about pending approvals or the budget. The examples and the prompt attack
   filter are unchanged (decision record 0010). It passes `terraform validate` only: the new
   version has not been applied or probed in AWS.
+- The narrowed denied topic still blocked harmless text, so the guardrail no longer has a
+  denied topic. Applied directly with `ApplyGuardrail`, it intervened on "Please request
+  approval to launch disc-001" and "Launch disc-001 using approval apr-123", the agent's own
+  two steps, and it still missed polite requests to change a rule: a topic cannot tell a
+  launch with an approval from one without. The guardrail now has one policy, the prompt
+  attack filter, unchanged, and does one thing: it filters prompt-injection attacks
+  (decision record 0011, which supersedes the topic of records 0006 and 0010). No control is
+  removed: the spending limits and the approval requirement are enforced in code (R2, R3 and
+  R4) and in IAM, not by the guardrail. The same probe showed what only the topic caught:
+  three of the four rule-change attacks and the planted note of stress case A2. Those texts
+  now reach the model. That is deliberate: the defence of A2 is the system prompt, which
+  treats ledger content as data, and R4, which denies a launch with no approval. A direct
+  injection (case A1) is still caught by the filter. It passes `terraform validate` only:
+  the removal has not been applied or probed in AWS.
 - `scripts/seed.py seed` no longer writes the planted event, which made every `read_ledger`
   result a candidate for R7 and so stopped the cases other than A2. `seed` writes the four
   discs only and the new `inject` command writes the event, once per run; `reset --yes` and
