@@ -1,10 +1,14 @@
 """Put the ledger table in a known state for the stress tests. A person runs this, by hand.
 
-`seed` writes the discs and the planted event of fareguard.ops.seed_data,
-`reset` deletes every item of the table and `show` prints the ledger as the
-read_ledger tool presents it. `seed` and `reset` write the table directly,
-outside the ledger store, which has no operation that adds a disc or deletes
-anything: see docs/decisions/0009-seed-and-reset-outside-the-store.md.
+`seed` writes the discs of fareguard.ops.seed_data, `inject` adds its planted
+event, `reset` deletes every item of the table and `show` prints the ledger as
+the read_ledger tool presents it. The planted event is written only on request:
+once it is there, every read of the ledger returns it, which is stress case A2
+and gets in the way of every other case. `seed`, `inject` and `reset` write the
+table directly, outside the ledger store, which has no operation that adds a
+disc or deletes anything: see
+docs/decisions/0009-seed-and-reset-outside-the-store.md and
+docs/decisions/0010-denied-topic-about-tampering-and-planted-event-on-request.md.
 
 A person runs it with an admin profile, never with the role of the agent. The
 table is read from `terraform output` in infra/main, so no table name and no
@@ -12,7 +16,8 @@ account id is written in this file.
 
 Usage:
     python scripts/seed.py reset --yes   # delete every item; refused without --yes
-    python scripts/seed.py seed          # write the discs and the planted event
+    python scripts/seed.py seed          # write the discs, and no event
+    python scripts/seed.py inject        # add the planted event of stress case A2
     python scripts/seed.py show          # print discs, month spend and recent events
 """
 
@@ -41,6 +46,7 @@ if TYPE_CHECKING:
     from mypy_boto3_dynamodb import DynamoDBClient
 
 SEED = "seed"
+INJECT = "inject"
 RESET = "reset"
 SHOW = "show"
 _IF_NEW = "attribute_not_exists(pk)"
@@ -57,15 +63,16 @@ def _utc_now() -> datetime:
 def _parse(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser(SEED, help="write the fixture discs and the planted event")
+    commands.add_parser(SEED, help="write the fixture discs, and no event")
+    commands.add_parser(INJECT, help="add the planted event of stress case A2")
     reset = commands.add_parser(RESET, help="delete every item of the ledger table")
     reset.add_argument("--yes", action="store_true", help="required: confirm the deletion")
     commands.add_parser(SHOW, help="print the ledger as the read_ledger tool presents it")
     return parser.parse_args(argv)
 
 
-def _seed(client: DynamoDBClient, table: str, at: datetime) -> int:
-    """Write each disc if it is new, then the planted event, and print what was written.
+def _seed(client: DynamoDBClient, table: str) -> int:
+    """Write each disc if it is new and print what was written. No event is written.
 
     A disc that exists is never replaced, because that would erase its spend
     and the mark of its pending request. The run stops there: reset first.
@@ -81,6 +88,11 @@ def _seed(client: DynamoDBClient, table: str, at: datetime) -> int:
             )
             return 1
         print(f"wrote disc {disc.disc_id}: {disc.duration_seconds // 60} minutes")
+    return 0
+
+
+def _inject(client: DynamoDBClient, table: str, at: datetime) -> int:
+    """Write the planted event, dated `at`, and print it. Each run adds one event."""
     event = planted_event(at)
     # A plain PutItem with no condition: the event is data, as any untrusted event would be.
     client.put_item(TableName=table, Item=items.event_item(event))
@@ -111,7 +123,9 @@ def _show(client: DynamoDBClient, table: str, at: datetime) -> int:
 
 def _run(command: str, client: DynamoDBClient, table: str, at: datetime) -> int:
     if command == SEED:
-        return _seed(client, table, at)
+        return _seed(client, table)
+    if command == INJECT:
+        return _inject(client, table, at)
     if command == RESET:
         return _reset(client, table)
     return _show(client, table, at)
@@ -124,7 +138,7 @@ def main(
     make_client: Callable[[LedgerTable], DynamoDBClient] = _dynamo_client,
     now: Callable[[], datetime] = _utc_now,
 ) -> int:
-    """Seed, reset or show the ledger table and return an exit code."""
+    """Seed, inject into, reset or show the ledger table and return an exit code."""
     args = _parse(argv)
     if args.command == RESET and not args.yes:
         print("✗ reset deletes every item of the ledger table; pass --yes", file=sys.stderr)

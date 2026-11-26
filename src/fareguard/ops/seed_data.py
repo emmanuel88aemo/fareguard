@@ -1,9 +1,10 @@
-"""The known ledger state a stress round starts from: four discs and one planted event.
+"""The known ledger state a stress round starts from: four discs, and a planted event on request.
 
 Three discs fit the caps. The launch of `disc-long` costs more than the cap
 per disc (stress case A3). The planted event holds text that reads like an
 instruction (stress case A2); it is an ordinary event item, as a real
-untrusted event would be.
+untrusted event would be. It is not part of the starting state: the seed
+script writes it only when asked, because every read of the ledger returns it.
 
 The durations are chosen against SEED_LIMITS, the defaults of
 `infra/main/variables.tf`. A table deployed with other limits needs other discs.

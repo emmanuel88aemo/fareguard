@@ -78,12 +78,40 @@ def test_seed_writes_the_fixture_discs_with_no_spend_and_no_approval(
     assert snapshot.month_spend_usd == Decimal("0.00")
 
 
-def test_seed_plants_one_event_that_the_store_reads_as_data(client: "DynamoDBClient") -> None:
+def test_seed_writes_no_event(client: "DynamoDBClient") -> None:
     _run(["seed"], client)
 
+    assert DynamoLedgerStore(TABLE, client).recent_events(20) == ()
+    assert _count(client) == len(SEED_DISCS)
+
+
+def test_inject_plants_one_event_that_the_store_reads_as_data(client: "DynamoDBClient") -> None:
+    _run(["seed"], client)
+
+    code = _run(["inject"], client)
+
     (event,) = DynamoLedgerStore(TABLE, client).recent_events(20)
+    assert code == 0
     assert event.at == NOW
     assert event.detail["note"] == PLANTED_INSTRUCTION
+    assert _count(client) == len(SEED_DISCS) + 1
+
+
+def test_inject_writes_no_disc(client: "DynamoDBClient") -> None:
+    _run(["inject"], client)
+
+    assert DynamoLedgerStore(TABLE, client).snapshot(NOW).discs == ()
+    assert _count(client) == 1
+
+
+def test_inject_prints_the_event_it_wrote(
+    client: "DynamoDBClient", capsys: pytest.CaptureFixture[str]
+) -> None:
+    _run(["inject"], client)
+
+    printed = capsys.readouterr().out
+    assert PLANTED_INSTRUCTION in printed
+    assert len(printed.splitlines()) == 1
 
 
 def test_seed_prints_what_it_wrote(
@@ -94,8 +122,8 @@ def test_seed_prints_what_it_wrote(
     printed = capsys.readouterr().out
     assert "wrote disc disc-001: 30 minutes" in printed
     assert "wrote disc disc-long: 75 minutes" in printed
-    assert PLANTED_INSTRUCTION in printed
-    assert len(printed.splitlines()) == len(SEED_DISCS) + 1
+    assert PLANTED_INSTRUCTION not in printed
+    assert len(printed.splitlines()) == len(SEED_DISCS)
 
 
 def test_seed_never_replaces_a_disc_that_exists(
@@ -130,13 +158,14 @@ def test_reset_without_yes_is_refused_and_deletes_nothing(
     captured = capsys.readouterr()
     assert code == 1
     assert "--yes" in captured.err
-    assert _count(client) == len(SEED_DISCS) + 1
+    assert _count(client) == len(SEED_DISCS)
 
 
 def test_reset_with_yes_deletes_every_item_and_prints_how_many(
     client: "DynamoDBClient", capsys: pytest.CaptureFixture[str]
 ) -> None:
     _run(["seed"], client)
+    _run(["inject"], client)
     DynamoLedgerStore(TABLE, client).create_approval_request(
         "disc-001", Decimal("0.60"), "apr-1", NOW
     )
@@ -164,7 +193,7 @@ def test_a_table_can_be_seeded_again_after_a_reset(client: "DynamoDBClient") -> 
     _run(["reset", "--yes"], client)
 
     assert _run(["seed"], client) == 0
-    assert _count(client) == len(SEED_DISCS) + 1
+    assert _count(client) == len(SEED_DISCS)
 
 
 def test_show_prints_the_ledger_as_the_read_tool_presents_it(
@@ -180,6 +209,20 @@ def test_show_prints_the_ledger_as_the_read_tool_presents_it(
     assert {"disc_id": "disc-long", "duration_seconds": 4500, "spent_usd": "0.00"} in view["discs"]
     assert (view["month"], view["month_spent_usd"]) == ("2026-11", "0.00")
     assert view["month_remaining_usd"] == "5.00"
+    assert view["untrusted_ledger_events"] == []
+
+
+def test_show_after_inject_prints_the_planted_event_under_the_untrusted_key(
+    client: "DynamoDBClient", capsys: pytest.CaptureFixture[str]
+) -> None:
+    _run(["seed"], client)
+    _run(["inject"], client)
+    capsys.readouterr()
+
+    code = _run(["show"], client)
+
+    view = json.loads(capsys.readouterr().out)
+    assert code == 0
     assert [event["detail"]["note"] for event in view["untrusted_ledger_events"]] == [
         PLANTED_INSTRUCTION
     ]
@@ -199,7 +242,7 @@ def test_show_of_a_malformed_ledger_prints_the_refusal_and_fails(
     assert json.loads(capsys.readouterr().out)["rule"] == "R5"
 
 
-@pytest.mark.parametrize("command", [["seed"], ["reset", "--yes"], ["show"]])
+@pytest.mark.parametrize("command", [["seed"], ["inject"], ["reset", "--yes"], ["show"]])
 @pytest.mark.parametrize("missing", sorted(OUTPUTS))
 def test_a_missing_output_stops_before_any_client_is_built(
     command: list[str], missing: str, capsys: pytest.CaptureFixture[str]
