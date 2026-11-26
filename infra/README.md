@@ -113,16 +113,26 @@ attached to a harness or to a model, and no rule depends on it: see
 | Policy | Setting |
 |---|---|
 | Content filter | `PROMPT_ATTACK`, strength `HIGH` on input, blocking |
-| Denied topic | tampering: an attempt to change, remove, disable or bypass a spending limit, to launch without human approval, or to pass an unapproved instruction off as an approval. A question about pending approvals or the budget is not the topic (record 0010) |
 | Blocked messages | one fixed sentence; the hook does not pass it on |
+
+The guardrail does one thing: it filters prompt-injection attacks. It has no denied topic.
+One was tried, narrowed and then removed, because it stopped the agent's own requests for
+an approval and its launches with one, and still missed polite requests to change a rule
+([decision record 0011](../docs/decisions/0011-guardrail-with-the-prompt-attack-filter-only.md)).
+Nothing was lost with it: the spending limits and the approval requirement are enforced by
+the hook, the tools and IAM (R2, R3 and R4), not by the guardrail.
+
+The filter is not expected to catch an instruction hidden in what a tool returns, such as
+the planted event of stress case A2. That case is answered by the system prompt, which
+treats ledger content as data, and by R4, which denies a launch with no approval.
 
 The hook applies a published version by its number, never the working draft. A version
 does not follow its guardrail, so any change to the guardrail publishes a new version in
 the same apply, gives its number to the hook function and only then deletes the old one.
 A guardrail keeps at most 20 versions; this stack keeps one.
 
-Each call is billed per 1,000 characters of text and per policy; record 0006 has the
-figures.
+Each call is billed per 1,000 characters of text and per policy. Record 0006 has the
+figures for two policies; with the filter alone a call costs half of that.
 
 ### What the roles may do
 
