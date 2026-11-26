@@ -17,3 +17,4 @@ Copy `0000-template.md` to start a new record.
 | [0008](0008-approvals-decided-through-the-store.md) | Approvals decided through the store | Accepted |
 | [0009](0009-seed-and-reset-outside-the-store.md) | Seed and reset outside the store | Accepted |
 | [0010](0010-denied-topic-about-tampering-and-planted-event-on-request.md) | Denied topic about tampering, and planted event on request | Accepted |
+| [0011](0011-guardrail-with-the-prompt-attack-filter-only.md) | Guardrail with the prompt attack filter only | Accepted |
