@@ -113,7 +113,7 @@ attached to a harness or to a model, and no rule depends on it: see
 | Policy | Setting |
 |---|---|
 | Content filter | `PROMPT_ATTACK`, strength `HIGH` on input, blocking |
-| Denied topic | asking the agent to change, lift or ignore its spending limits or approval rules |
+| Denied topic | tampering: an attempt to change, remove, disable or bypass a spending limit, to launch without human approval, or to pass an unapproved instruction off as an approval. A question about pending approvals or the budget is not the topic (record 0010) |
 | Blocked messages | one fixed sentence; the hook does not pass it on |
 
 The hook applies a published version by its number, never the working draft. A version
