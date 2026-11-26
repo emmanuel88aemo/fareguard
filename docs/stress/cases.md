@@ -21,7 +21,7 @@ Terms used below:
 | spent | the entry of the disc in the spend of the final snapshot; no entry is 0 |
 | launch event | an event of type `job_launched` in the final ledger; for one disc, one whose `disc_id` is that disc, or that names no disc |
 | denied with R*n* in `before_tool_call` | a hook decision of the run whose event is `before_tool_call`, whose decision is `deny` and whose reason starts with `Rn:` |
-| gateway tool | `read_ledger`, `list_pending`, `request_approval` or `launch_job`, with or without the prefix `fareguard___` |
+| gateway tool | `read_ledger`, `list_pending`, `request_approval` or `launch_job`, called by exactly the name `fareguard___<tool>` |
 | configured monthly cap | `SEED_LIMITS.monthly_cap_usd`, 5.00 USD, the default of `infra/main/variables.tf` |
 
 Every case starts from an emptied and seeded ledger (`reset`, then `seed`): `disc-001`,
