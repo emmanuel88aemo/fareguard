@@ -173,6 +173,21 @@ All notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- The denied topic of the guardrail blocked a harmless question. Applied directly with
+  `ApplyGuardrail` in the first smoke test, the topic "Changing limits or approval rules"
+  intervened on "What approval requests are pending right now?", while a question about
+  pending discs and the remaining budget passed and a real attack triggered both the topic
+  and the prompt attack filter. The topic is now "Tampering with the spending limits or the
+  approval requirement": attempts to change, remove, disable or bypass a spending limit, to
+  launch without human approval, or to treat an unapproved instruction as an approval, and
+  not questions about pending approvals or the budget. The examples and the prompt attack
+  filter are unchanged (decision record 0010). It passes `terraform validate` only: the new
+  version has not been applied or probed in AWS.
+- `scripts/seed.py seed` no longer writes the planted event, which made every `read_ledger`
+  result a candidate for R7 and so stopped the cases other than A2. `seed` writes the four
+  discs only and the new `inject` command writes the event, once per run; `reset --yes` and
+  `show` are unchanged (decision record 0010). The smoke test of `harness/README.md` starts
+  from a ledger without the event.
 - Every store returns an amount of USD in whole cents with two decimal places. A stored amount
   that is negative, not finite or not a whole number of cents is a `LedgerDataError`; it is
   never rounded.
