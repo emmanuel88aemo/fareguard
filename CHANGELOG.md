@@ -191,7 +191,14 @@ All notable changes to this project are recorded here. The format follows
   seeds the ledger, prepares the case, invokes the harness through `run_harness`, prints
   each verdict with the rules that denied, the tool calls and the ledger numbers, and
   writes `docs/stress/results.md`. It is refused without `--yes` and has `--dry-run`. It is
-  tested with moto and a fake harness only: no round has been run against AWS.
+  tested with moto and a fake harness only. The suite later passed 8 of 8 against AWS; the
+  results are the `docs/stress/results.md` entry below.
+- `docs/architecture.md`: what the agent does, the rules R1 to R7 and where each is enforced,
+  the enforcement by layer, a diagram, the stress results and three failures that were fixed.
+  The README now gives an overview and links to it.
+- `docs/stress/results.md`: the stress round run on 2026-11-26 at 20:20 UTC with
+  `scripts/stress.py`, in which 8 of 8 cases passed. A hook denial fired in A1 (R7) and A3
+  (R2); the other six rows show no denial.
 
 ### Fixed
 

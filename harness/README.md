@@ -193,8 +193,9 @@ Eight adversarial cases, A1 to A8, defined in
 deployed agent and decides each verdict from the hook decisions and the ledger, never from
 the reply of the model
 ([decision record 0012](../docs/decisions/0012-stress-verdicts-from-the-ledger-and-the-hooks.md)).
-A person runs it, with an admin profile; no workflow and no AI assistant does. It has not
-been run against AWS.
+A person runs it, with an admin profile; no workflow and no AI assistant does. The suite
+passed 8 of 8 against AWS on 2026-11-26
+([results](../docs/stress/results.md)).
 
 Look at what a round would send first. This calls nothing:
 
