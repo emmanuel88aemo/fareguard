@@ -14,7 +14,6 @@ from fareguard.hook.decide import (
     MAX_REASON_LENGTH,
     HookResult,
     decide,
-    normalise_tool_name,
     undecided,
 )
 from fareguard.ledger.memory import InMemoryLedgerStore
@@ -447,24 +446,6 @@ def test_prefix_does_not_let_an_over_cap_launch_through() -> None:
     store = make_store(disc_spend_usd={"disc-1": Decimal("0.90")})
 
     assert_denied(decide(make_event("fareguard-tools___launch_job"), store, LIMITS, NOW), "R2")
-
-
-@pytest.mark.parametrize(
-    ("name", "expected"),
-    [
-        ("launch_job", "launch_job"),
-        ("target___launch_job", "launch_job"),
-        ("a___b___read_ledger", "read_ledger"),
-        ("target___", ""),
-        ("___", ""),
-        ("launch__job", "launch__job"),
-        ("", ""),
-    ],
-)
-def test_normalise_tool_name_keeps_what_follows_the_last_separator(
-    name: str, expected: str
-) -> None:
-    assert normalise_tool_name(name) == expected
 
 
 def test_tool_name_that_is_only_a_prefix_is_denied_with_r1() -> None:

@@ -16,11 +16,11 @@ from typing import Literal, TypedDict, TypeGuard
 from fareguard.gate.evaluate import evaluate
 from fareguard.gate.models import Limits, RuleId, ToolCall
 from fareguard.ledger.store import LedgerStore
+from fareguard.tool_names import normalise_tool_name
 
 BEFORE_TOOL_CALL = "before_tool_call"
 MAX_REASON_LENGTH = 1024
 MAX_RAW_TOOL_LENGTH = 128
-TARGET_SEPARATOR = "___"
 
 ALLOWED_REASON = "allowed"
 DENIAL_REASONS: Mapping[RuleId, str] = {
@@ -94,13 +94,6 @@ class _Outcome:
 
 _UNREAD = _Request()
 _UNEVALUATED = _Outcome("R5")
-
-
-def normalise_tool_name(name: str) -> str:
-    """Return the tool name without the gateway target: what follows the last "___"."""
-    # ASSUMPTION, to confirm at deploy time: the gateway prefixes a tool name with its
-    # target as "<target>___<tool>". This function is the only place that knows the format.
-    return name.rpartition(TARGET_SEPARATOR)[2]
 
 
 def decide(event: object, store: LedgerStore, limits: Limits, now: datetime) -> HookResult:

@@ -11,9 +11,10 @@ from decimal import Decimal
 from fareguard.gate.models import RuleId
 from fareguard.harness.config import TOOL_NAMES
 from fareguard.harness.run import HarnessRun
-from fareguard.hook.decide import BEFORE_TOOL_CALL, normalise_tool_name
+from fareguard.hook.decide import BEFORE_TOOL_CALL
 from fareguard.ledger.store import APPROVED, JOB_LAUNCHED, NO_SPEND_USD, LedgerEvent
 from fareguard.stress.case import FinalLedger
+from fareguard.tool_names import normalise_tool_name
 
 GATEWAY_TOOLS: frozenset[str] = frozenset(TOOL_NAMES)
 DENY = "deny"

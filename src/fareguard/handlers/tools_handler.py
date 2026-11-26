@@ -20,9 +20,10 @@ import boto3
 
 from fareguard.gate.models import Limits
 from fareguard.handlers.config import load_config
-from fareguard.hook.decide import MAX_RAW_TOOL_LENGTH, normalise_tool_name
+from fareguard.hook.decide import MAX_RAW_TOOL_LENGTH
 from fareguard.ledger.dynamodb import DynamoLedgerStore
 from fareguard.ledger.store import LedgerStore
+from fareguard.tool_names import normalise_tool_name
 from fareguard.tools.dispatch import ToolContext, ToolResult, dispatch
 from fareguard.tools.results import Detailed, refusal
 
@@ -76,7 +77,7 @@ def _read_tool_name(context: object) -> str | None:
     # ASSUMPTION, to confirm at deploy time: the gateway passes the tool name in the Lambda
     # context, as context.client_context.custom["bedrockAgentCoreToolName"], and the event
     # holds nothing but the tool's arguments. This function is the only place that knows
-    # where the name is; `normalise_tool_name` is the only place that knows its prefix.
+    # where the name is; `fareguard.tool_names` is the only place that knows its prefix.
     client_context = getattr(context, "client_context", None)
     custom = getattr(client_context, "custom", None)
     name = custom.get(TOOL_NAME_KEY) if isinstance(custom, Mapping) else None
