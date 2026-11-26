@@ -5,6 +5,8 @@ import pytest
 from botocore.exceptions import ClientError
 
 import invoke_harness as ih
+from fareguard.harness.run import SESSION_ID as SESSION_ID_SHAPE
+from fareguard.harness.run import build_request
 
 # A made-up value with the shape of a real ARN; the account is twelve zeros.
 HARNESS_ARN = "arn:aws:bedrock-agentcore:us-east-1:000000000000:harness/fareguard_dev-abcdefghij"
@@ -33,22 +35,6 @@ def _text(text: str) -> object:
     return {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": text}}}
 
 
-def test_a_generated_session_id_has_the_required_length() -> None:
-    session_id = ih.new_session_id()
-
-    assert 33 <= len(session_id) <= 100
-    assert ih.SESSION_ID.fullmatch(session_id)
-    assert session_id != ih.new_session_id()
-
-
-def test_the_request_overrides_nothing_of_the_harness() -> None:
-    assert ih.build_request(HARNESS_ARN, SESSION_ID, "hello") == {
-        "harnessArn": HARNESS_ARN,
-        "runtimeSessionId": SESSION_ID,
-        "messages": [{"role": "user", "content": [{"text": "hello"}]}],
-    }
-
-
 def test_the_reply_is_printed_and_the_message_is_sent_once(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -64,10 +50,23 @@ def test_the_reply_is_printed_and_the_message_is_sent_once(
     out = capsys.readouterr().out
     assert code == 0
     assert client.regions == ["us-east-1"]
-    assert client.calls == [ih.build_request(HARNESS_ARN, SESSION_ID, "What is queued?")]
-    assert f"runtime session id: {SESSION_ID}" in out
-    assert "Two discs queued." in out
-    assert "stop reasons: end_turn" in out
+    assert client.calls == [build_request(HARNESS_ARN, SESSION_ID, "What is queued?")]
+    assert out == "\n".join(
+        [
+            f"runtime session id: {SESSION_ID}",
+            "reply:",
+            "Two discs queued.",
+            "",
+            "tool calls:",
+            "  (none)",
+            "",
+            "hook decisions:",
+            "  (none)",
+            "",
+            "stop reasons: end_turn",
+            "",
+        ]
+    )
 
 
 def test_dry_run_prints_the_request_and_builds_no_client(
@@ -82,7 +81,7 @@ def test_dry_run_prints_the_request_and_builds_no_client(
     assert code == 0
     assert client.regions == []
     assert request["harnessArn"] == HARNESS_ARN
-    assert ih.SESSION_ID.fullmatch(request["runtimeSessionId"])
+    assert SESSION_ID_SHAPE.fullmatch(request["runtimeSessionId"])
 
 
 def test_a_model_the_stream_rejects_is_printed_word_for_word(

@@ -17,47 +17,25 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
-import uuid
-from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Protocol
+from collections.abc import Callable, Sequence
 
 import boto3
-from botocore.config import Config
-from botocore.exceptions import BotoCoreError, ClientError
+from botocore.exceptions import ClientError
 
-from fareguard.harness.stream import format_transcript, read_stream
+from fareguard.harness.run import (
+    CLIENT_CONFIG,
+    HarnessRun,
+    InvalidRequestError,
+    RuntimeClient,
+    build_request,
+    format_run,
+    new_session_id,
+    run_harness,
+)
 
 HARNESS_ARN_VARIABLE = "FAREGUARD_HARNESS_ARN"
-# InvokeHarness requires a runtime session id of 33 to 100 characters.
-SESSION_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{32,99}$")
 REGION_FIELD = 3
-
-# One attempt: a retry would send the message, and perhaps a launch, a second time.
-# The read timeout is longer than the 300 seconds an invocation may take.
-CLIENT_CONFIG = Config(read_timeout=330, retries={"total_max_attempts": 1})
-
-
-class RuntimeClient(Protocol):
-    """The one operation of the bedrock-agentcore client that is used."""
-
-    def invoke_harness(self, **kwargs: object) -> Mapping[str, object]:
-        """Invoke a harness and return the response of the API, which holds the stream."""
-
-
-def new_session_id() -> str:
-    """Return a new runtime session id: 42 characters, within the 33 to 100 required."""
-    return f"fareguard-{uuid.uuid4().hex}"
-
-
-def build_request(harness_arn: str, session_id: str, message: str) -> dict[str, object]:
-    """Return the arguments of InvokeHarness for one user message, with no override."""
-    return {
-        "harnessArn": harness_arn,
-        "runtimeSessionId": session_id,
-        "messages": [{"role": "user", "content": [{"text": message}]}],
-    }
 
 
 def _runtime_client(region: str) -> RuntimeClient:
@@ -72,25 +50,16 @@ def _region_of(arn: str) -> str | None:
     return fields[REGION_FIELD] if len(fields) > REGION_FIELD and fields[REGION_FIELD] else None
 
 
-def _invoke(request: Mapping[str, object], client: RuntimeClient) -> int:
-    """Call InvokeHarness once, print the transcript and any error exactly as AWS gave it."""
-    events: list[object] = []
-    failure: Exception | None = None
-    try:
-        stream = client.invoke_harness(**request).get("stream")
-        events.extend(stream if isinstance(stream, Iterable) else ())
-    except (ClientError, BotoCoreError) as error:
-        failure = error
-
+def _report(run: HarnessRun) -> int:
+    """Print the transcript and any error exactly as AWS gave it, and return the exit code."""
     # What arrived before a failure is still printed.
-    transcript = read_stream(events)
-    print(format_transcript(transcript))
-    if failure is not None:
-        print(f"InvokeHarness failed: {failure}", file=sys.stderr)
-        if isinstance(failure, ClientError):
-            print(json.dumps(failure.response, indent=2, default=str), file=sys.stderr)
+    print(format_run(run))
+    if run.failure is not None:
+        print(f"InvokeHarness failed: {run.failure}", file=sys.stderr)
+        if isinstance(run.failure, ClientError):
+            print(json.dumps(run.failure.response, indent=2, default=str), file=sys.stderr)
         return 1
-    return 1 if transcript.errors else 0
+    return 1 if run.errors else 0
 
 
 def _parse(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -112,17 +81,6 @@ def _parse(argv: Sequence[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _problem(region: str | None, message: str, session_id: str) -> str | None:
-    """Return what is wrong with the arguments, or None when the request can be sent."""
-    if region is None:
-        return f"give --harness-arn or set {HARNESS_ARN_VARIABLE}"
-    if not message.strip():
-        return "the message must not be empty"
-    if SESSION_ID.fullmatch(session_id) is None:
-        return "the session id must be 33 to 100 letters, digits, - or _"
-    return None
-
-
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -132,17 +90,20 @@ def main(
     args = _parse(argv)
     session_id = args.session_id or new_session_id()
     region = _region_of(args.harness_arn)
-    problem = _problem(region, args.message, session_id)
-    if region is None or problem is not None:
-        print(f"✗ {problem}", file=sys.stderr)
+    if region is None:
+        print(f"✗ give --harness-arn or set {HARNESS_ARN_VARIABLE}", file=sys.stderr)
+        return 1
+    try:
+        request = build_request(args.harness_arn, session_id, args.message)
+    except InvalidRequestError as error:
+        print(f"✗ {error}", file=sys.stderr)
         return 1
 
-    request = build_request(args.harness_arn, session_id, args.message)
     print(f"runtime session id: {session_id}")
     if args.dry_run:
         print(json.dumps(request, indent=2))
         return 0
-    return _invoke(request, make_client(region))
+    return _report(run_harness(make_client(region), args.harness_arn, args.message, session_id))
 
 
 if __name__ == "__main__":
