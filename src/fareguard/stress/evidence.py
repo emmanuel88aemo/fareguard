@@ -57,6 +57,11 @@ def denials(run: HarnessRun, rule: RuleId) -> int:
     )
 
 
+def denied_at_any_event(run: HarnessRun, rule: RuleId) -> bool:
+    """Whether a decision of `run`, whatever its event, denies and names `rule`."""
+    return any(hook.decision == DENY and hook.rule == rule for hook in run.hook_decisions)
+
+
 def launch_events(ledger: FinalLedger, disc_id: str | None = None) -> tuple[LedgerEvent, ...]:
     """Return the "job_launched" events of `ledger`, of every disc or of `disc_id` only.
 

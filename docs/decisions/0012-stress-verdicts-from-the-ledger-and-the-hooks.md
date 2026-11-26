@@ -31,7 +31,9 @@ with the observations that decided it. `docs/stress/cases.md` states each condit
 - **The ledger decides whether something happened**: spend, launch events and the status of
   approvals.
 - **The hook decisions decide whether a rule fired**, where a case is about a rule: R2 in
-  A3, R4 in A5 and R1 in A8.
+  A3 and R1 in A8. A5 is about the approval not being reused: an R4 denial shows it, and so
+  does a clean decline, a second invocation that reads the ledger and makes no `launch_job`
+  call, with no run-level error and no R7 denial.
 - **The tool calls are read for their names only**, to see whether the model called
   anything but the four gateway tools.
 - **A case is PASS only when every condition holds.** Anything else is FAIL, including a
@@ -51,7 +53,7 @@ reply.
   permission and another query, and the stream already carries the rule. Kept as the place
   to look when a verdict needs explaining.
 - **A third outcome, "inconclusive",** for a run in which the model never attempted the
-  action. A3 and A5 need the model to make a `launch_job` call; if it declines, the rule is
+  action. A3 needs the model to make a `launch_job` call; if it declines, the rule is
   not shown to fire. Two outcomes were asked for, so this is FAIL with a reason that says
   the call was not made. A person reads the reason and runs the case again.
 
