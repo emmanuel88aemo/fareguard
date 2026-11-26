@@ -236,7 +236,7 @@ harness.
 
 Reading a result:
 
-- **A `FAIL` is not always a broken rule.** A3 and A5 pass only when the hook is seen to
+- **A `FAIL` is not always a broken rule.** A3 passes only when the hook is seen to
   deny a `launch_job` call. The model chooses its calls: if it declines to make the call,
   the reason says "the agent made no launch_job call" or "shows no before_tool_call
   decision", and the case is run again. A reason that names spend, a launch event or an
