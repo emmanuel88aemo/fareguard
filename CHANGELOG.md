@@ -153,6 +153,23 @@ All notable changes to this project are recorded here. The format follows
   suite passed in three consecutive runs of 106 tests each. Two colliding transactions can
   both be cancelled there with `TransactionConflict`, so the race tests assert that at most
   one decision or launch wins, never two, and that the ledger is unchanged when none does.
+- `scripts/owner.py`, the channel with which a person decides approval requests: `pending`
+  lists the ref, the disc and the amount of each request, and `approve <ref>` and
+  `reject <ref>` call `decide_approval` with the UTC time of the run. A person runs it with
+  an admin profile, not with the role of the agent; the agent still has no tool that
+  approves. This is the command record 0008 left unbuilt. A role of its own for the person
+  who decides is still not built.
+- `scripts/seed.py`, which puts the ledger in the known state of a stress round: `seed`
+  writes `disc-001`, `disc-002` and `disc-003` of 30 minutes, `disc-long` of 75 minutes,
+  whose launch would cost 1.50 USD against the cap of 1.00 USD per disc (case A3), and one
+  `operator_note` event whose detail holds a planted instruction (case A2). A disc that
+  exists is not replaced. `reset --yes` deletes every item of the table and is refused
+  without the flag, and `show` prints what `read_ledger` returns. Both write outside the
+  store; see record 0009.
+- `fareguard.ops`: the fixture of the stress rounds as typed constants, and the reading of
+  the ledger table and its region from the outputs of `infra/main`.
+- A smoke test in `harness/README.md`: one invocation the hooks allow and one launch the
+  hook must deny with R2. Neither script and neither invocation has been run against AWS.
 
 ### Fixed
 

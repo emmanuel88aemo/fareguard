@@ -15,3 +15,4 @@ Copy `0000-template.md` to start a new record.
 | [0006](0006-guardrail-applied-by-the-hook.md) | Guardrail applied by the hook, as a second layer | Accepted |
 | [0007](0007-harness-with-a-pinned-model-and-no-built-in-tools.md) | Harness with a pinned model and no built-in tools | Accepted |
 | [0008](0008-approvals-decided-through-the-store.md) | Approvals decided through the store | Accepted |
+| [0009](0009-seed-and-reset-outside-the-store.md) | Seed and reset outside the store | Accepted |
