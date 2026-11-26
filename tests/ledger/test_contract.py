@@ -1,7 +1,9 @@
 """The contract every LedgerStore must honour. It runs once per implementation."""
 
 import dataclasses
+import threading
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -12,16 +14,23 @@ from fareguard.gate.models import Approval, Disc, LedgerSnapshot, Limits, ToolCa
 from fareguard.gate.pricing import estimate_cost
 from fareguard.gate.validation import is_well_formed_snapshot
 from fareguard.ledger.errors import (
+    ApprovalDiscMismatchError,
+    ApprovalNotPendingError,
     ApprovalRefExistsError,
     InvalidLedgerInputError,
     LedgerDataError,
+    LedgerError,
+    LedgerTransactionError,
     PendingApprovalExistsError,
+    UnknownApprovalError,
     UnknownDiscError,
 )
-from fareguard.ledger.store import Launch, LedgerEvent, LedgerStore, month_of
+from fareguard.ledger.store import DecidedApproval, Launch, LedgerEvent, LedgerStore, month_of
 
 type MakeStore = Callable[..., LedgerStore]
 type State = tuple[LedgerSnapshot, tuple[LedgerEvent, ...]]
+# A decision that loses a race is refused by its condition or cancelled as a conflict.
+type DecisionOutcome = DecidedApproval | LedgerError
 
 AT = datetime(2026, 11, 25, 10, 0, tzinfo=UTC)
 MONTH = month_of(AT)
@@ -33,6 +42,11 @@ OTHER_DISC = Disc("disc-2", 600)
 DISCS = (DISC, OTHER_DISC)
 APPROVAL = Approval("apr-1", "launch_job", "disc-1", ESTIMATE, "approved", False)
 LAUNCH = Launch("disc-1", "apr-1", ESTIMATE, AT)
+PENDING = dataclasses.replace(APPROVAL, status="pending")
+DECIDED_AT = AT + timedelta(minutes=1)
+LAUNCH_AFTER_DECISION = Launch("disc-1", "apr-1", ESTIMATE, AT + timedelta(minutes=2))
+BARRIER_TIMEOUT_SECONDS = 30
+RACE_ROUNDS = 5
 
 
 def approval(**changes: object) -> Approval:
@@ -323,6 +337,236 @@ def test_malformed_approval_request_is_rejected_and_changes_nothing(
     assert store.pending_approvals() == ()
 
 
+def test_approved_request_is_not_consumed_and_allows_one_launch(make_store: MakeStore) -> None:
+    store = make_store(DISCS)
+    store.create_approval_request("disc-1", ESTIMATE, "apr-1", AT)
+
+    decided = store.decide_approval("apr-1", True, DECIDED_AT)
+
+    snapshot, events = state(store)
+    assert decided == DecidedApproval("apr-1", "disc-1", "approved")
+    assert snapshot.approvals == (APPROVAL,)
+    assert store.pending_approvals() == ()
+    assert (snapshot.month_spend_usd, snapshot.disc_spend_usd) == (Decimal("0"), {})
+    assert events[0] == LedgerEvent(
+        at=DECIDED_AT,
+        event_id="approval_decided:apr-1",
+        type="approval_decided",
+        detail={"disc_id": "disc-1", "approval_ref": "apr-1", "decision": "approved"},
+    )
+    assert [event.type for event in events] == ["approval_decided", "approval_requested"]
+    assert store.record_launch(LAUNCH_AFTER_DECISION, LIMITS).launched is True
+    assert store.snapshot(AT).approvals == (approval(consumed=True),)
+    again = dataclasses.replace(LAUNCH_AFTER_DECISION, at=AT + timedelta(minutes=3))
+    assert store.record_launch(again, LIMITS).rule == "R4"
+
+
+def test_rejected_request_is_not_consumed_and_allows_no_launch(make_store: MakeStore) -> None:
+    store = make_store(DISCS)
+    store.create_approval_request("disc-1", ESTIMATE, "apr-1", AT)
+
+    decided = store.decide_approval("apr-1", False, DECIDED_AT)
+
+    rejected = approval(status="rejected")
+    assert decided == DecidedApproval("apr-1", "disc-1", "rejected")
+    assert store.snapshot(AT).approvals == (rejected,)
+    assert store.pending_approvals() == ()
+    assert store.recent_events(1)[0].detail == {
+        "disc_id": "disc-1",
+        "approval_ref": "apr-1",
+        "decision": "rejected",
+    }
+    after_decision = state(store)
+    assert store.record_launch(LAUNCH_AFTER_DECISION, LIMITS).rule == "R4"
+    assert state(store) == after_decision
+
+
+@pytest.mark.parametrize("approved", [True, False])
+@pytest.mark.parametrize(
+    ("approvals", "error"),
+    [
+        pytest.param([approval(ref="apr-2", status="pending")], UnknownApprovalError, id="unknown"),
+        pytest.param([], UnknownApprovalError, id="empty-ledger"),
+        pytest.param([APPROVAL], ApprovalNotPendingError, id="already-approved"),
+        pytest.param([approval(status="rejected")], ApprovalNotPendingError, id="already-rejected"),
+        pytest.param([approval(consumed=True)], ApprovalNotPendingError, id="approved-consumed"),
+        pytest.param(
+            [approval(status="pending", consumed=True)],
+            ApprovalNotPendingError,
+            id="pending-but-consumed",
+        ),
+        pytest.param(
+            [PENDING, approval(ref="apr-2", status="pending")],
+            ApprovalDiscMismatchError,
+            id="disc-marked-with-another-request",
+        ),
+        pytest.param(
+            [approval(status="pending", disc_id="disc-9")],
+            ApprovalDiscMismatchError,
+            id="disc-not-in-the-ledger",
+        ),
+        pytest.param(
+            [approval(status="pending", disc_id="Disc 1")],
+            LedgerDataError,
+            id="held-disc-id-is-not-an-identifier",
+        ),
+    ],
+)
+def test_refused_decision_raises_its_error_and_changes_nothing(
+    make_store: MakeStore, approvals: list[Approval], error: type[Exception], approved: bool
+) -> None:
+    store = make_store(DISCS, approvals)
+    before = state(store)
+    pending = store.pending_approvals()
+
+    with pytest.raises(error):
+        store.decide_approval("apr-1", approved, DECIDED_AT)
+
+    assert state(store) == before
+    assert store.pending_approvals() == pending
+
+
+@pytest.mark.parametrize(("first", "second"), [(True, False), (False, True), (True, True)])
+def test_decided_request_cannot_be_decided_again(
+    make_store: MakeStore, first: bool, second: bool
+) -> None:
+    store = make_store(DISCS, [PENDING])
+    store.decide_approval("apr-1", first, DECIDED_AT)
+    after_first = state(store)
+
+    with pytest.raises(ApprovalNotPendingError):
+        store.decide_approval("apr-1", second, DECIDED_AT + timedelta(minutes=1))
+
+    assert state(store) == after_first
+
+
+def test_launched_approval_cannot_be_decided(make_store: MakeStore) -> None:
+    store = make_store(DISCS, [PENDING])
+    store.decide_approval("apr-1", True, DECIDED_AT)
+    store.record_launch(LAUNCH_AFTER_DECISION, LIMITS)
+    after_launch = state(store)
+
+    with pytest.raises(ApprovalNotPendingError):
+        store.decide_approval("apr-1", False, AT + timedelta(minutes=3))
+
+    assert state(store) == after_launch
+
+
+@pytest.mark.parametrize("approved", [True, False])
+def test_disc_can_be_requested_again_after_a_decision_R6(  # noqa: N802  # rule id
+    make_store: MakeStore, approved: bool
+) -> None:
+    store = make_store(DISCS, [PENDING])
+    with pytest.raises(PendingApprovalExistsError):
+        store.create_approval_request("disc-1", ESTIMATE, "apr-2", AT)
+
+    store.decide_approval("apr-1", approved, DECIDED_AT)
+    store.create_approval_request("disc-1", ESTIMATE, "apr-2", AT + timedelta(minutes=2))
+
+    assert [a.ref for a in store.pending_approvals()] == ["apr-2"]
+    with pytest.raises(PendingApprovalExistsError):
+        store.create_approval_request("disc-1", ESTIMATE, "apr-3", AT + timedelta(minutes=3))
+    assert store.decide_approval("apr-2", True, AT + timedelta(minutes=4)).status == "approved"
+    assert store.pending_approvals() == ()
+
+
+def test_decision_leaves_the_request_of_another_disc_pending(make_store: MakeStore) -> None:
+    other = approval(ref="apr-2", disc_id="disc-2", status="pending")
+    store = make_store(DISCS, [PENDING, other])
+
+    store.decide_approval("apr-1", False, DECIDED_AT)
+
+    assert store.pending_approvals() == (other,)
+    with pytest.raises(PendingApprovalExistsError):
+        store.create_approval_request("disc-2", ESTIMATE, "apr-3", AT)
+
+
+@pytest.mark.parametrize(
+    ("ref", "approved", "at"),
+    [
+        pytest.param("apr 1", True, DECIDED_AT, id="malformed-ref"),
+        pytest.param("apr-1", "yes", DECIDED_AT, id="truthy-string"),
+        pytest.param("apr-1", 1, DECIDED_AT, id="one-is-not-true"),
+        pytest.param("apr-1", None, DECIDED_AT, id="none"),
+        pytest.param("apr-1", True, DECIDED_AT.replace(tzinfo=None), id="naive-time"),
+    ],
+)
+def test_malformed_decision_is_rejected_and_changes_nothing(
+    make_store: MakeStore, ref: str, approved: bool, at: datetime
+) -> None:
+    store = make_store(DISCS, [PENDING])
+    before = state(store)
+
+    with pytest.raises(InvalidLedgerInputError):
+        store.decide_approval(ref, approved, at)
+
+    assert state(store) == before
+    assert store.pending_approvals() == (PENDING,)
+
+
+def decide_together(store: LedgerStore, ref: str) -> list[DecisionOutcome]:
+    """Approve and reject `ref` from two threads released at the same moment."""
+    barrier = threading.Barrier(2)
+
+    def attempt(approved: bool) -> DecisionOutcome:
+        barrier.wait(timeout=BARRIER_TIMEOUT_SECONDS)
+        # Different times give different events, so only the approval can stop the loser.
+        at = DECIDED_AT + timedelta(seconds=int(approved))
+        try:
+            return store.decide_approval(ref, approved, at)
+        except (ApprovalNotPendingError, LedgerTransactionError) as error:
+            return error
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        return list(pool.map(attempt, [True, False]))
+
+
+def test_two_concurrent_decisions_on_one_request_at_most_one_wins(make_store: MakeStore) -> None:
+    """Race an approval against a rejection, several times: at most one wins, never both.
+
+    DynamoDB may cancel both colliding transactions as conflicts, so a round can
+    have no winner. The ledger must then be as it was: nothing half decided.
+    """
+    discs = [Disc(f"disc-{number}", 600) for number in range(1, RACE_ROUNDS + 1)]
+    requests = [
+        approval(ref=f"apr-{number}", disc_id=f"disc-{number}", status="pending")
+        for number in range(1, RACE_ROUNDS + 1)
+    ]
+    store = make_store(discs, requests)
+
+    for request in requests:
+        outcomes = decide_together(store, request.ref)
+
+        winners = [o for o in outcomes if isinstance(o, DecidedApproval)]
+        refused = [o for o in outcomes if isinstance(o, ApprovalNotPendingError)]
+        held = {a.ref: a for a in store.snapshot(AT).approvals}[request.ref]
+        logged = [
+            event.detail
+            for event in store.recent_events(100)
+            if event.event_id == f"approval_decided:{request.ref}"
+        ]
+        retry_ref, retry_at = f"{request.ref}-retry", AT + timedelta(hours=1)
+        assert len(winners) <= 1
+        assert held.consumed is False
+        if winners:
+            decision = winners[0].status
+            assert held.status == decision
+            assert logged == [
+                {"disc_id": request.disc_id, "approval_ref": request.ref, "decision": decision}
+            ]
+            # The mark is cleared: the disc accepts a new request.
+            store.create_approval_request(request.disc_id, ESTIMATE, retry_ref, retry_at)
+        else:
+            # Nobody decided, so nobody can have been told that somebody else did.
+            assert refused == []
+            assert held == request
+            assert logged == []
+            # The mark is unchanged: the disc still refuses a new request.
+            with pytest.raises(PendingApprovalExistsError):
+                store.create_approval_request(request.disc_id, ESTIMATE, retry_ref, retry_at)
+        assert (request in store.pending_approvals()) is not bool(winners)
+
+
 def test_recent_events_are_newest_first_and_limited(make_store: MakeStore) -> None:
     store = make_store(DISCS, [APPROVAL])
     store.create_approval_request("disc-2", ESTIMATE, "apr-2", AT - timedelta(hours=1))
@@ -502,5 +746,6 @@ def test_store_exposes_only_the_protocol_operations(make_store: MakeStore) -> No
         "recent_events",
         "pending_approvals",
         "create_approval_request",
+        "decide_approval",
         "record_launch",
     }

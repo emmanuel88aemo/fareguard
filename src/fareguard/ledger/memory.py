@@ -11,8 +11,11 @@ from decimal import Decimal
 
 from fareguard.gate.models import Approval, Disc, LedgerSnapshot, Limits
 from fareguard.ledger.errors import (
+    ApprovalDiscMismatchError,
+    ApprovalNotPendingError,
     ApprovalRefExistsError,
     PendingApprovalExistsError,
+    UnknownApprovalError,
     UnknownDiscError,
 )
 from fareguard.ledger.store import (
@@ -21,7 +24,9 @@ from fareguard.ledger.store import (
     LAUNCHED,
     NO_SPEND_USD,
     PENDING,
+    ApprovalDecision,
     ApprovalRequest,
+    DecidedApproval,
     Launch,
     LaunchCheck,
     LaunchResult,
@@ -68,8 +73,10 @@ class InMemoryLedgerStore:
         self._disc_spend = dict(disc_spend_usd or {})
         self._month_spend = dict(month_spend_usd or {})
         self._events: dict[str, LedgerEvent] = {}
-        self._discs_with_pending_request = {
-            approval.disc_id for approval in self._approvals.values() if approval.status == PENDING
+        self._pending_refs = {
+            approval.disc_id: approval.ref
+            for approval in self._approvals.values()
+            if approval.status == PENDING and approval.disc_id in self._discs
         }
 
     def snapshot(self, at: datetime) -> LedgerSnapshot:
@@ -115,11 +122,28 @@ class InMemoryLedgerStore:
                 raise ApprovalRefExistsError(ref)
             if disc_id not in self._discs:
                 raise UnknownDiscError(disc_id)
-            if disc_id in self._discs_with_pending_request:
+            if disc_id in self._pending_refs:
                 raise PendingApprovalExistsError(disc_id)
             self._approvals[ref] = request.approval()
-            self._discs_with_pending_request.add(disc_id)
+            self._pending_refs[disc_id] = ref
             self._events[event_sort_key(request.event())] = request.event()
+
+    def decide_approval(self, ref: str, approved: bool, at: datetime) -> DecidedApproval:
+        """Set the status, free the disc and log the decision, or change nothing and say why."""
+        decision = ApprovalDecision(ref, approved, at)
+        with self._lock:
+            approval = self._approvals.get(ref)
+            if approval is None:
+                raise UnknownApprovalError(ref)
+            event = decision.event(approval.disc_id)
+            if approval.status != PENDING or approval.consumed:
+                raise ApprovalNotPendingError(ref)
+            if self._pending_refs.get(approval.disc_id) != ref:
+                raise ApprovalDiscMismatchError(ref, approval.disc_id)
+            self._approvals[ref] = dataclasses.replace(approval, status=decision.status)
+            del self._pending_refs[approval.disc_id]
+            self._events[event_sort_key(event)] = event
+        return decision.outcome(approval.disc_id)
 
     def record_launch(self, launch: Launch, limits: Limits) -> LaunchResult:
         """Apply the launch if every condition holds; otherwise change nothing and say why."""

@@ -8,7 +8,12 @@ from botocore.exceptions import ClientError
 from fareguard.gate.models import Approval, Disc, Limits
 from fareguard.ledger import dynamodb
 from fareguard.ledger.dynamodb import DynamoLedgerStore
-from fareguard.ledger.errors import LedgerDataError, LedgerTransactionError
+from fareguard.ledger.errors import (
+    ApprovalNotPendingError,
+    LedgerDataError,
+    LedgerTransactionError,
+    UnknownApprovalError,
+)
 from fareguard.ledger.store import Launch, LedgerStore
 
 if TYPE_CHECKING:
@@ -31,6 +36,9 @@ APPROVAL_ITEM = {
     "consumed": {"BOOL": False},
     "requested_at": {"S": "2026-11-24T09:00:00+00:00"},
 }
+PENDING_ITEM = {**APPROVAL_ITEM, "status": {"S": "pending"}}
+MARKED_DISC_ITEM = {**DISC_ITEM, "pending_approval_ref": {"S": "apr-1"}}
+DECISION_EVENT_KEY = "2026-11-25T10:00:00.000000+00:00#approval_decided:apr-1"
 
 
 class Table:
@@ -187,6 +195,108 @@ def test_approval_request_is_one_transaction_of_three_writes(
             },
         },
     }
+
+
+@pytest.mark.parametrize(
+    ("approved", "status"),
+    [pytest.param(True, "approved", id="approve"), pytest.param(False, "rejected", id="reject")],
+)
+def test_decision_is_one_transaction_of_three_conditional_writes(
+    table: Table, store: DynamoLedgerStore, approved: bool, status: str
+) -> None:
+    table.put(MARKED_DISC_ITEM, PENDING_ITEM)
+
+    store.decide_approval("apr-1", approved, AT)
+
+    (writes,) = table.transactions
+    assert [next(iter(write)) for write in writes] == ["Update", "Update", "Put"]
+    assert [next(iter(write.values()))["TableName"] for write in writes] == [table.name] * 3
+    assert all("ConditionExpression" in next(iter(write.values())) for write in writes)
+    assert table.all() == {
+        "APPROVAL/apr-1": {**PENDING_ITEM, "status": {"S": status}},
+        "DISC/disc-1": DISC_ITEM,
+        f"EVENT/{DECISION_EVENT_KEY}": {
+            "pk": {"S": "EVENT"},
+            "sk": {"S": DECISION_EVENT_KEY},
+            "type": {"S": "approval_decided"},
+            "detail": {
+                "M": {
+                    "disc_id": {"S": "disc-1"},
+                    "approval_ref": {"S": "apr-1"},
+                    "decision": {"S": status},
+                }
+            },
+        },
+    }
+
+
+def test_decision_sends_no_name_or_value_its_expressions_do_not_use(
+    table: Table, store: DynamoLedgerStore
+) -> None:
+    """Real DynamoDB rejects a write that carries an unused name or value; moto may not."""
+    table.put(MARKED_DISC_ITEM, PENDING_ITEM)
+
+    store.decide_approval("apr-1", True, AT)
+
+    (writes,) = table.transactions
+    for write in writes:
+        (arguments,) = write.values()
+        expressions = f"{arguments.get('UpdateExpression', '')} {arguments['ConditionExpression']}"
+        placeholders = [
+            *arguments.get("ExpressionAttributeNames", {}),
+            *arguments.get("ExpressionAttributeValues", {}),
+        ]
+        assert [name for name in placeholders if name not in expressions.split()] == []
+
+
+def test_refused_decision_is_one_transaction_and_is_not_retried(
+    table: Table, store: DynamoLedgerStore
+) -> None:
+    table.put(MARKED_DISC_ITEM, APPROVAL_ITEM)
+    before = table.all()
+
+    with pytest.raises(ApprovalNotPendingError):
+        store.decide_approval("apr-1", False, AT)
+
+    assert len(table.transactions) == 1
+    assert table.all() == before
+
+
+def test_decision_on_an_unknown_ref_starts_no_transaction(
+    table: Table, store: DynamoLedgerStore
+) -> None:
+    table.put(MARKED_DISC_ITEM)
+
+    with pytest.raises(UnknownApprovalError):
+        store.decide_approval("apr-1", True, AT)
+
+    assert table.transactions == []
+    assert table.all() == {"DISC/disc-1": MARKED_DISC_ITEM}
+
+
+def test_decision_on_an_approval_stored_without_a_disc_starts_no_transaction(
+    table: Table, store: DynamoLedgerStore
+) -> None:
+    table.put({name: value for name, value in PENDING_ITEM.items() if name != "disc_id"})
+
+    with pytest.raises(LedgerDataError, match="disc_id"):
+        store.decide_approval("apr-1", True, AT)
+
+    assert table.transactions == []
+
+
+def test_decision_whose_event_already_exists_is_cancelled_and_changes_nothing(
+    table: Table, store: DynamoLedgerStore
+) -> None:
+    table.put(
+        MARKED_DISC_ITEM, PENDING_ITEM, {"pk": {"S": "EVENT"}, "sk": {"S": DECISION_EVENT_KEY}}
+    )
+    before = table.all()
+
+    with pytest.raises(LedgerTransactionError, match="already exists"):
+        store.decide_approval("apr-1", True, AT)
+
+    assert table.all() == before
 
 
 def test_request_whose_event_already_exists_is_cancelled_and_changes_nothing(

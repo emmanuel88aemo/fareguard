@@ -5,9 +5,15 @@ from typing import Any
 import pytest
 
 from fareguard.gate.models import Approval, Limits, RuleId
-from fareguard.ledger.errors import InvalidLaunchResultError, InvalidLedgerInputError
+from fareguard.ledger.errors import (
+    InvalidLaunchResultError,
+    InvalidLedgerInputError,
+    LedgerDataError,
+)
 from fareguard.ledger.store import (
+    ApprovalDecision,
     ApprovalRequest,
+    DecidedApproval,
     Launch,
     LaunchCheck,
     LaunchResult,
@@ -28,6 +34,7 @@ LAUNCH_FIELDS: dict[str, Any] = {
     "estimate_usd": Decimal("0.20"),
     "at": AT,
 }
+DECISION_FIELDS: dict[str, Any] = {"ref": "apr-1", "approved": True, "at": AT}
 REQUEST_FIELDS: dict[str, Any] = {
     "disc_id": "disc-1",
     "approved_usd": Decimal("0.20"),
@@ -120,6 +127,60 @@ def test_approval_request_event_carries_the_request_as_data() -> None:
         type="approval_requested",
         detail={"disc_id": "disc-1", "approval_ref": "apr-1", "approved_usd": Decimal("0.20")},
     )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        pytest.param("ref", INJECTION, id="ref-injection"),
+        pytest.param("ref", "", id="ref-empty"),
+        pytest.param("ref", None, id="ref-none"),
+        pytest.param("approved", "yes", id="approved-truthy-string"),
+        pytest.param("approved", INJECTION, id="approved-injection"),
+        pytest.param("approved", 1, id="approved-one"),
+        pytest.param("approved", 0, id="approved-zero"),
+        pytest.param("approved", None, id="approved-none"),
+        pytest.param("at", NAIVE, id="at-naive"),
+        pytest.param("at", "2026-11-25T10:00:00+00:00", id="at-string"),
+    ],
+)
+def test_malformed_decision_is_rejected_without_repeating_the_value(field: str, value: Any) -> None:  # noqa: ANN401  # wrong types are the input under test
+    with pytest.raises(InvalidLedgerInputError, match=f"^{field} is malformed") as raised:
+        ApprovalDecision(**{**DECISION_FIELDS, field: value})
+
+    assert INJECTION not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    ("approved", "status"),
+    [pytest.param(True, "approved", id="approve"), pytest.param(False, "rejected", id="reject")],
+)
+def test_decision_event_carries_the_decision_as_data(approved: bool, status: str) -> None:
+    decision = ApprovalDecision("apr-1", approved, AT)
+
+    assert decision.status == status
+    assert decision.outcome("disc-1") == DecidedApproval("apr-1", "disc-1", status)
+    assert decision.event("disc-1") == LedgerEvent(
+        at=AT,
+        event_id="approval_decided:apr-1",
+        type="approval_decided",
+        detail={"disc_id": "disc-1", "approval_ref": "apr-1", "decision": status},
+    )
+
+
+@pytest.mark.parametrize("disc_id", [INJECTION, "", "Disc-1"])
+def test_decision_event_refuses_a_held_disc_id_that_is_not_an_identifier(disc_id: str) -> None:
+    with pytest.raises(LedgerDataError, match="'disc_id'") as raised:
+        ApprovalDecision(**DECISION_FIELDS).event(disc_id)
+
+    assert INJECTION not in str(raised.value)
+
+
+def test_request_and_decision_at_the_same_instant_have_different_event_keys() -> None:
+    request = ApprovalRequest(**REQUEST_FIELDS).event()
+    decision = ApprovalDecision(**DECISION_FIELDS).event("disc-1")
+
+    assert event_sort_key(request) != event_sort_key(decision)
 
 
 def test_launch_event_carries_the_launch_as_data() -> None:
