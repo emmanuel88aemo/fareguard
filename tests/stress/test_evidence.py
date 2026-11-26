@@ -39,8 +39,8 @@ def test_tool_names_lists_every_call_of_every_run_in_order() -> None:
     assert tool_names(runs) == ("fareguard___read_ledger", "shell", "fareguard___launch_job")
 
 
-def test_a_gateway_tool_is_not_foreign_with_or_without_its_target() -> None:
-    names = ("fareguard___read_ledger", "list_pending", "fareguard___request_approval")
+def test_a_tool_under_its_gateway_name_is_not_foreign() -> None:
+    names = ("fareguard___read_ledger", "fareguard___request_approval")
 
     assert foreign_tool_calls(run(tools=names)) == ()
 
@@ -49,6 +49,12 @@ def test_any_other_tool_is_foreign() -> None:
     names = ("shell", "fareguard___launch_job", "fareguard___approve", "read ledger")
 
     assert foreign_tool_calls(run(tools=names)) == ("shell", "fareguard___approve", "read?ledger")
+
+
+def test_a_tool_without_the_exact_gateway_prefix_is_foreign() -> None:
+    names = ("list_pending", "other___read_ledger")
+
+    assert foreign_tool_calls(run(tools=names)) == names
 
 
 def test_calls_tool_compares_the_name_without_the_target() -> None:

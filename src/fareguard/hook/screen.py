@@ -20,9 +20,9 @@ from fareguard.hook.decide import (
     DENIAL_REASONS,
     MAX_RAW_TOOL_LENGTH,
     HookAnswer,
-    normalise_tool_name,
 )
 from fareguard.hook.guardrail import Guardrail
+from fareguard.tool_names import normalise_tool_name
 
 BEFORE_INVOCATION = "before_invocation"
 AFTER_TOOL_CALL = "after_tool_call"

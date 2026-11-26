@@ -23,7 +23,7 @@ elsewhere, as the next section describes.
 
 | Rule | What it means | Enforced in |
 |---|---|---|
-| R1 | A tool that is not one of `read_ledger`, `list_pending`, `request_approval` and `launch_job` does not run. The gateway prefix of a name is removed before the comparison. | `evaluate` in [`gate/evaluate.py`](../src/fareguard/gate/evaluate.py) |
+| R1 | A tool that is not one of `read_ledger`, `list_pending`, `request_approval` and `launch_job` does not run. A call arrives as `fareguard___<tool>`; under any other name, a bare tool name included, it is denied. | `evaluate` in [`gate/evaluate.py`](../src/fareguard/gate/evaluate.py) |
 | R2 | What was already spent on a disc, plus the estimate, must not exceed the cap per disc. | `evaluate` in [`gate/evaluate.py`](../src/fareguard/gate/evaluate.py) |
 | R3 | What was already spent this month, plus the estimate, must not exceed the monthly cap. | `evaluate` in [`gate/evaluate.py`](../src/fareguard/gate/evaluate.py) |
 | R4 | A launch needs an approval with that reference which is approved, unused, issued for `launch_job` and for this disc, and covers the estimate. The launch consumes it. | `evaluate` in [`gate/evaluate.py`](../src/fareguard/gate/evaluate.py) |
@@ -59,7 +59,10 @@ replace it, the model and the system prompt for one call. The caller cannot repl
 hooks, which are set to deny when the hook function fails. So R1 is enforced by the gate in
 the hook, and the tools function refuses an unknown name again
 ([record 0007](decisions/0007-harness-with-a-pinned-model-and-no-built-in-tools.md)). Both
-compare the name after its last `___`, so R1 judges that last part, not the prefix.
+reduce only exactly `fareguard___<tool>` to the tool, with
+[one function](../src/fareguard/tool_names.py). Its prefix is the name of the gateway target
+in [`infra/main/gateway.tf`](../infra/main/gateway.tf); if the two differ, every tool call is
+denied.
 
 IAM does not evaluate R1 to R7. It limits what each role can do if something else goes wrong:
 

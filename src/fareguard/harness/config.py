@@ -14,16 +14,15 @@ from dataclasses import dataclass
 from typing import Literal, TypedDict
 
 from fareguard.gate.evaluate import LAUNCH_JOB, LIST_PENDING, READ_LEDGER, REQUEST_APPROVAL
-from fareguard.hook.decide import TARGET_SEPARATOR
+from fareguard.tool_names import GATEWAY_TARGET_NAME, TARGET_SEPARATOR
 
 # The Amazon Nova 2 Lite inference profile of the US regions. The execution role in
 # infra/main/iam_harness.tf may invoke this model and no other.
 MODEL_ID = "us.amazon.nova-2-lite-v1:0"
 
-# The name of the gateway tool entry, and the name of the gateway target that prefixes
-# every tool name (infra/main/gateway.tf). Both happen to be the same word.
+# The name of the gateway tool entry. It happens to be the same word as the name of the
+# gateway target, GATEWAY_TARGET_NAME, but the two are set independently.
 GATEWAY_TOOL_NAME = "fareguard"
-GATEWAY_TARGET_NAME = "fareguard"
 
 TOOL_NAMES: tuple[str, ...] = (READ_LEDGER, LIST_PENDING, REQUEST_APPROVAL, LAUNCH_JOB)
 

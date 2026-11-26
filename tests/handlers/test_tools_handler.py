@@ -122,11 +122,10 @@ def logged(capsys: pytest.CaptureFixture[str]) -> list[dict[str, object]]:
 
 
 @pytest.mark.usefixtures("table")
-@pytest.mark.parametrize("tool", ["read_ledger", "fareguard-tools___read_ledger"])
-def test_prefixed_and_unprefixed_tool_names_are_both_handled(
-    tool: str, capsys: pytest.CaptureFixture[str]
+def test_gateway_tool_name_is_reduced_to_the_tool(
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    result = call(tool)
+    result = call("fareguard___read_ledger")
 
     assert result == {
         "discs": [
@@ -139,26 +138,53 @@ def test_prefixed_and_unprefixed_tool_names_are_both_handled(
         UNTRUSTED_EVENTS: [],
     }
     assert logged(capsys) == [
-        {"tool": "read_ledger", "raw_tool": tool, "rule": None, "detail": None, "error": None}
+        {
+            "tool": "read_ledger",
+            "raw_tool": "fareguard___read_ledger",
+            "rule": None,
+            "detail": None,
+            "error": None,
+        }
     ]
 
 
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [
+        ("other___read_ledger", {}),
+        ("evil___launch_job", LAUNCH_INPUT),
+        ("fareguard___evil___launch_job", LAUNCH_INPUT),
+        ("read_ledger", {}),
+        ("launch_job", LAUNCH_INPUT),
+        ("shell", {}),
+        ("fareguard___", {}),
+        ("", {}),
+    ],
+)
+def test_name_without_the_exact_gateway_prefix_is_refused_with_r1(
+    table: "DynamoDBClient", tool: str, arguments: object
+) -> None:
+    assert call(tool, arguments) == refusal("R1")
+    assert get(table, "APPROVAL", "apr-1")["consumed"] == {"BOOL": False}
+    assert count(table, "EVENT") == 0
+
+
 def test_approved_launch_is_recorded_and_consumes_its_approval(table: "DynamoDBClient") -> None:
-    result = call("fareguard-tools___launch_job", LAUNCH_INPUT)
+    result = call("fareguard___launch_job", LAUNCH_INPUT)
 
     assert result == {"launched": True, "rule": None, "reason": "launched"}
     assert get(table, "APPROVAL", "apr-1")["consumed"] == {"BOOL": True}
     # moto keeps the trailing zero of a number and DynamoDB drops it, so compare the amount.
     assert Decimal(get(table, "DISC", "disc-1")["spent_usd"]["N"]) == Decimal("0.20")
     assert count(table, "EVENT") == 1
-    assert call("read_ledger")["month_spent_usd"] == "0.20"
+    assert call("fareguard___read_ledger")["month_spent_usd"] == "0.20"
 
 
 def test_launch_without_an_approval_is_refused_and_records_nothing(
     table: "DynamoDBClient", capsys: pytest.CaptureFixture[str]
 ) -> None:
     # No hook ran before this call: the tools Lambda is the only check.
-    result = call("launch_job", {"disc_id": "disc-2", "approval_ref": "apr-1"})
+    result = call("fareguard___launch_job", {"disc_id": "disc-2", "approval_ref": "apr-1"})
 
     assert result == {"launched": False, "rule": "R4", "reason": reason_for("R4")}
     assert get(table, "APPROVAL", "apr-1")["consumed"] == {"BOOL": False}
@@ -171,9 +197,9 @@ def test_launch_without_an_approval_is_refused_and_records_nothing(
 @pytest.mark.usefixtures("table")
 def test_approval_cannot_be_used_twice() -> None:
     # Stress case: A5
-    assert call("launch_job", LAUNCH_INPUT)["launched"] is True
+    assert call("fareguard___launch_job", LAUNCH_INPUT)["launched"] is True
 
-    assert call("launch_job", LAUNCH_INPUT) == {
+    assert call("fareguard___launch_job", LAUNCH_INPUT) == {
         "launched": False,
         "rule": "R4",
         "reason": reason_for("R4"),
@@ -184,21 +210,21 @@ def test_launch_over_the_disc_cap_is_refused_with_r2(table: "DynamoDBClient") ->
     # Stress case: A3
     put(table, "DISC", "disc-1", duration_seconds={"N": "600"}, spent_usd={"N": "0.9"})
 
-    assert call("launch_job", LAUNCH_INPUT)["rule"] == "R2"
+    assert call("fareguard___launch_job", LAUNCH_INPUT)["rule"] == "R2"
     assert count(table, "EVENT") == 0
 
 
 def test_request_approval_creates_a_pending_request_with_a_generated_ref(
     table: "DynamoDBClient",
 ) -> None:
-    result = call("request_approval", {"disc_id": "disc-2"})
+    result = call("fareguard___request_approval", {"disc_id": "disc-2"})
 
     ref = result["approval_ref"]
     assert GENERATED_REF.fullmatch(ref)
     assert result["requested"] is True
     assert result["estimate_usd"] == "0.04"
     assert get(table, "APPROVAL", ref)["status"] == {"S": "pending"}
-    assert call("list_pending") == {
+    assert call("fareguard___list_pending") == {
         "pending": [{"approval_ref": ref, "disc_id": "disc-2", "requested_usd": "0.04"}]
     }
 
@@ -206,9 +232,9 @@ def test_request_approval_creates_a_pending_request_with_a_generated_ref(
 def test_second_request_for_the_same_disc_is_refused_with_r6(
     table: "DynamoDBClient", capsys: pytest.CaptureFixture[str]
 ) -> None:
-    first = call("request_approval", {"disc_id": "disc-2"})
+    first = call("fareguard___request_approval", {"disc_id": "disc-2"})
 
-    second = call("request_approval", {"disc_id": "disc-2"})
+    second = call("fareguard___request_approval", {"disc_id": "disc-2"})
 
     assert second == {
         "requested": False,
@@ -234,7 +260,7 @@ def test_planted_text_in_the_ledger_is_returned_only_under_the_untrusted_key(
         detail={"M": {"note": {"S": INJECTION}, "approved_usd": {"N": "0.2"}}},
     )
 
-    result = call("read_ledger")
+    result = call("fareguard___read_ledger")
 
     events = result.pop(UNTRUSTED_EVENTS)
     assert UNTRUSTED_EVENTS == "untrusted_ledger_events"
@@ -250,11 +276,11 @@ def test_planted_text_in_the_ledger_is_returned_only_under_the_untrusted_key(
     ("tool", "arguments"),
     [
         (INJECTION, {}),
-        ("read_ledger", {"note": INJECTION}),
-        ("request_approval", {"disc_id": INJECTION}),
-        ("launch_job", {"disc_id": INJECTION, "approval_ref": "apr-1"}),
-        ("launch_job", {"disc_id": "disc-1", "approval_ref": INJECTION}),
-        ("launch_job", {**LAUNCH_INPUT, INJECTION: INJECTION}),
+        ("fareguard___read_ledger", {"note": INJECTION}),
+        ("fareguard___request_approval", {"disc_id": INJECTION}),
+        ("fareguard___launch_job", {"disc_id": INJECTION, "approval_ref": "apr-1"}),
+        ("fareguard___launch_job", {"disc_id": "disc-1", "approval_ref": INJECTION}),
+        ("fareguard___launch_job", {**LAUNCH_INPUT, INJECTION: INJECTION}),
     ],
 )
 def test_text_sent_in_a_call_never_appears_in_a_result_and_no_argument_is_logged(
@@ -273,9 +299,17 @@ def test_text_sent_in_a_call_never_appears_in_a_result_and_no_argument_is_logged
 @pytest.mark.parametrize(
     ("tool", "arguments", "rule"),
     [
-        ("request_approval", {"disc_id": IDENTIFIER_INJECTION}, "R5"),
-        ("launch_job", {"disc_id": IDENTIFIER_INJECTION, "approval_ref": "apr-1"}, "R5"),
-        ("launch_job", {"disc_id": "disc-1", "approval_ref": IDENTIFIER_INJECTION}, "R4"),
+        ("fareguard___request_approval", {"disc_id": IDENTIFIER_INJECTION}, "R5"),
+        (
+            "fareguard___launch_job",
+            {"disc_id": IDENTIFIER_INJECTION, "approval_ref": "apr-1"},
+            "R5",
+        ),
+        (
+            "fareguard___launch_job",
+            {"disc_id": "disc-1", "approval_ref": IDENTIFIER_INJECTION},
+            "R4",
+        ),
     ],
 )
 def test_text_with_the_shape_of_an_identifier_is_logged_but_never_returned(
@@ -292,11 +326,11 @@ def test_text_with_the_shape_of_an_identifier_is_logged_but_never_returned(
 
 @pytest.mark.usefixtures("table")
 def test_unknown_tool_is_refused_with_r1(capsys: pytest.CaptureFixture[str]) -> None:
-    assert call("fareguard-tools___delete_ledger") == refusal("R1")
+    assert call("fareguard___delete_ledger") == refusal("R1")
     assert logged(capsys) == [
         {
-            "tool": "delete_ledger",
-            "raw_tool": "fareguard-tools___delete_ledger",
+            "tool": "fareguard___delete_ledger",
+            "raw_tool": "fareguard___delete_ledger",
             "rule": "R1",
             "detail": "the requested tool does not exist",
             "error": None,
@@ -329,7 +363,7 @@ def test_missing_tool_name_is_refused_with_r5(
 
 @pytest.mark.parametrize("event", [None, "launch_job", [], 7, {"disc_id": "disc-1"}, {"x": {}}])
 def test_malformed_arguments_are_refused_with_r5(table: "DynamoDBClient", event: object) -> None:
-    assert lambda_handler(event, gateway_context("launch_job")) == R5_REFUSAL
+    assert lambda_handler(event, gateway_context("fareguard___launch_job")) == R5_REFUSAL
     assert count(table, "EVENT") == 0
 
 
@@ -340,11 +374,11 @@ def test_missing_environment_variable_makes_the_handler_refuse(
 ) -> None:
     monkeypatch.delenv(variable)
 
-    assert call("read_ledger") == R5_REFUSAL
+    assert call("fareguard___read_ledger") == R5_REFUSAL
     assert logged(capsys) == [
         {
             "tool": "read_ledger",
-            "raw_tool": "read_ledger",
+            "raw_tool": "fareguard___read_ledger",
             "rule": "R5",
             "detail": None,
             "error": "ConfigError",
@@ -370,7 +404,7 @@ def test_invalid_environment_variable_makes_the_handler_refuse(
 ) -> None:
     monkeypatch.setenv(variable, value)
 
-    assert call("launch_job", LAUNCH_INPUT) == R5_REFUSAL
+    assert call("fareguard___launch_job", LAUNCH_INPUT) == R5_REFUSAL
     assert get(table, "APPROVAL", "apr-1")["consumed"] == {"BOOL": False}
 
 
@@ -379,10 +413,10 @@ def test_broken_configuration_is_read_again_on_the_next_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv(MONTHLY_CAP_USD)
-    assert call("read_ledger") == R5_REFUSAL
+    assert call("fareguard___read_ledger") == R5_REFUSAL
     monkeypatch.setenv(MONTHLY_CAP_USD, "5.00")
 
-    assert call("read_ledger")["month_remaining_usd"] == "5.00"
+    assert call("fareguard___read_ledger")["month_remaining_usd"] == "5.00"
 
 
 @pytest.mark.usefixtures("table")
@@ -391,7 +425,7 @@ def test_table_that_does_not_exist_is_refused_without_a_stack_trace(
 ) -> None:
     monkeypatch.setenv(TABLE_NAME, "fareguard-missing-ledger")
 
-    assert call("read_ledger") == R5_REFUSAL
+    assert call("fareguard___read_ledger") == R5_REFUSAL
     assert logged(capsys)[0]["error"] == "ResourceNotFoundException"
 
 
@@ -404,7 +438,7 @@ def test_client_that_cannot_be_built_is_refused_without_its_message(
 
     monkeypatch.setattr(boto3, "client", fail)
 
-    assert call("launch_job", LAUNCH_INPUT) == R5_REFUSAL
+    assert call("fareguard___launch_job", LAUNCH_INPUT) == R5_REFUSAL
     captured = capsys.readouterr()
     assert json.loads(captured.out)["error"] == "RuntimeError"
     assert INJECTION not in captured.out + captured.err
@@ -424,16 +458,16 @@ def test_client_store_and_limits_are_built_once_per_container(
     monkeypatch.setattr(boto3, "client", build)
 
     for _ in range(3):
-        assert "discs" in call("read_ledger")
+        assert "discs" in call("fareguard___read_ledger")
 
     assert built == ["dynamodb"]
 
 
 @pytest.mark.usefixtures("table")
 def test_each_call_is_logged_as_one_json_line(capsys: pytest.CaptureFixture[str]) -> None:
-    call("read_ledger")
-    call("delete_ledger")
-    call("launch_job", {"disc_id": "disc-1", "approval_ref": "apr-9"})
+    call("fareguard___read_ledger")
+    call("fareguard___delete_ledger")
+    call("fareguard___launch_job", {"disc_id": "disc-1", "approval_ref": "apr-9"})
 
     assert [(record["rule"], record["detail"]) for record in logged(capsys)] == [
         (None, None),

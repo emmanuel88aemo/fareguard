@@ -14,7 +14,6 @@ from fareguard.hook.decide import (
     MAX_REASON_LENGTH,
     HookResult,
     decide,
-    normalise_tool_name,
     undecided,
 )
 from fareguard.ledger.memory import InMemoryLedgerStore
@@ -46,7 +45,7 @@ def make_store(
 
 
 def make_event(
-    tool: object = "launch_job", tool_input: object = LAUNCH_INPUT, **changes: object
+    tool: object = "fareguard___launch_job", tool_input: object = LAUNCH_INPUT, **changes: object
 ) -> dict[str, object]:
     """Return a "before_tool_call" event as the harness sends it, with top-level `changes`."""
     event: dict[str, object] = {
@@ -80,7 +79,7 @@ def test_approved_launch_within_caps_is_allowed() -> None:
         "hookEventId": "evt-1",
         "sessionId": "session-1",
         "tool": "launch_job",
-        "raw_tool": "launch_job",
+        "raw_tool": "fareguard___launch_job",
         "allowed": True,
         "rule": None,
         "detail": "allowed",
@@ -91,19 +90,20 @@ def test_approved_launch_within_caps_is_allowed() -> None:
 @pytest.mark.parametrize(
     ("tool", "tool_input"),
     [
-        ("read_ledger", {}),
-        ("list_pending", {}),
-        ("request_approval", {"disc_id": "disc-1"}),
+        ("fareguard___read_ledger", {}),
+        ("fareguard___list_pending", {}),
+        ("fareguard___request_approval", {"disc_id": "disc-1"}),
+        ("fareguard___launch_job", LAUNCH_INPUT),
     ],
 )
-def test_well_formed_call_to_a_free_tool_is_allowed(tool: str, tool_input: object) -> None:
+def test_well_formed_call_to_each_gateway_tool_is_allowed(tool: str, tool_input: object) -> None:
     result = decide(make_event(tool, tool_input), make_store(), LIMITS, NOW)
 
     assert result.answer["decision"] == "allow"
 
 
 def test_unknown_tool_is_denied_with_r1() -> None:
-    result = decide(make_event("delete_ledger", {}), make_store(), LIMITS, NOW)
+    result = decide(make_event("fareguard___delete_ledger", {}), make_store(), LIMITS, NOW)
 
     assert_denied(result, "R1")
     assert result.record["error"] is None
@@ -160,7 +160,7 @@ def test_unusable_tool_input_is_denied_with_r5(tool_input: object) -> None:
 
 
 def test_missing_tool_input_is_denied_with_r5() -> None:
-    event = make_event(context={"toolName": "read_ledger", "toolType": "gateway"})
+    event = make_event(context={"toolName": "fareguard___read_ledger", "toolType": "gateway"})
 
     assert_denied(decide(event, make_store(), LIMITS, NOW), "R5")
 
@@ -195,13 +195,13 @@ def test_missing_context_is_denied_with_r5() -> None:
 
 @pytest.mark.parametrize("event_type", ["after_tool_call", "BEFORE_TOOL_CALL", "", None, 1])
 def test_another_event_type_is_denied_with_r5(event_type: object) -> None:
-    event = make_event("read_ledger", {}, event=event_type)
+    event = make_event("fareguard___read_ledger", {}, event=event_type)
 
     assert_denied(decide(event, make_store(), LIMITS, NOW), "R5")
 
 
 def test_missing_event_type_is_denied_with_r5() -> None:
-    event = make_event("read_ledger", {})
+    event = make_event("fareguard___read_ledger", {})
     del event["event"]
 
     assert_denied(decide(event, make_store(), LIMITS, NOW), "R5")
@@ -258,12 +258,16 @@ def test_malformed_limits_are_denied_with_r5() -> None:
     [
         pytest.param("{text}", {}, id="tool name"),
         pytest.param("target___{text}", {}, id="prefixed tool name"),
-        pytest.param("launch_job", {"disc_id": "{text}", "approval_ref": "apr-1"}, id="disc_id"),
         pytest.param(
-            "launch_job", {"disc_id": "disc-1", "approval_ref": "{text}"}, id="approval_ref"
+            "fareguard___launch_job", {"disc_id": "{text}", "approval_ref": "apr-1"}, id="disc_id"
         ),
-        pytest.param("request_approval", {"disc_id": "{text}"}, id="request disc_id"),
-        pytest.param("launch_job", {"{text}": "{text}"}, id="argument name"),
+        pytest.param(
+            "fareguard___launch_job",
+            {"disc_id": "disc-1", "approval_ref": "{text}"},
+            id="approval_ref",
+        ),
+        pytest.param("fareguard___request_approval", {"disc_id": "{text}"}, id="request disc_id"),
+        pytest.param("fareguard___launch_job", {"{text}": "{text}"}, id="argument name"),
     ],
 )
 def test_reason_never_contains_text_from_the_event(
@@ -347,7 +351,7 @@ def test_detail_is_empty_when_the_gate_was_not_reached() -> None:
 
 
 @pytest.mark.parametrize(
-    "tool", ["launch_job", "fareguard-tools___launch_job", "Some.Target___Launch_Job", INJECTION]
+    "tool", ["launch_job", "fareguard___launch_job", "Some.Target___Launch_Job", INJECTION]
 )
 def test_raw_tool_is_the_tool_name_exactly_as_it_arrived(tool: str) -> None:
     result = decide(make_event(tool), make_store(), LIMITS, NOW)
@@ -361,8 +365,8 @@ def test_raw_tool_is_cut_to_128_characters() -> None:
     result = decide(make_event(tool), make_store(), LIMITS, NOW)
 
     assert result.record["raw_tool"] == "t" * 128
-    assert result.record["tool"] == "launch_job"
-    assert result.answer["decision"] == "allow"
+    assert result.record["tool"] == tool
+    assert_denied(result, "R1")
 
 
 def test_raw_tool_is_recorded_when_the_rest_of_the_event_is_unusable() -> None:
@@ -387,14 +391,14 @@ def test_raw_tool_that_is_not_text_is_left_out_of_the_record(tool: object) -> No
 @pytest.mark.parametrize(
     ("tool", "tool_input"),
     [
-        pytest.param("target___delete_ledger", {}, id="R1"),
-        pytest.param("target___launch_job", LAUNCH_INPUT, id="R2"),
+        pytest.param("fareguard___delete_ledger", {}, id="R1"),
+        pytest.param("fareguard___launch_job", LAUNCH_INPUT, id="R2"),
         pytest.param(
-            "target___launch_job", {"disc_id": "disc-1", "approval_ref": "apr-9"}, id="R4"
+            "fareguard___launch_job", {"disc_id": "disc-1", "approval_ref": "apr-9"}, id="R4"
         ),
-        pytest.param("target___read_ledger", {"all": True}, id="R5 arguments"),
+        pytest.param("fareguard___read_ledger", {"all": True}, id="R5 arguments"),
         pytest.param(
-            "target___request_approval", {"disc_id": IDENTIFIER_INJECTION}, id="R5 unknown disc"
+            "fareguard___request_approval", {"disc_id": IDENTIFIER_INJECTION}, id="R5 unknown disc"
         ),
         pytest.param(INJECTION, {}, id="injection as tool name"),
     ],
@@ -416,7 +420,7 @@ def test_detail_and_raw_tool_never_appear_in_the_answer(tool: str, tool_input: o
 
 
 def test_answer_of_an_allowed_call_holds_only_the_fixed_reason() -> None:
-    result = decide(make_event("target___launch_job"), make_store(), LIMITS, NOW)
+    result = decide(make_event("fareguard___launch_job"), make_store(), LIMITS, NOW)
 
     assert result.answer == {"decision": "allow", "reason": ALLOWED_REASON}
 
@@ -425,7 +429,10 @@ def test_identifiers_that_are_not_text_are_left_out_of_the_record() -> None:
     marker = {"truncated": True, "preview": INJECTION}
 
     result = decide(
-        make_event("read_ledger", {}, hookEventId=marker, sessionId=7), make_store(), LIMITS, NOW
+        make_event("fareguard___read_ledger", {}, hookEventId=marker, sessionId=7),
+        make_store(),
+        LIMITS,
+        NOW,
     )
 
     assert result.answer["decision"] == "allow"
@@ -434,41 +441,22 @@ def test_identifiers_that_are_not_text_are_left_out_of_the_record() -> None:
 
 
 @pytest.mark.parametrize(
-    "tool", ["launch_job", "fareguard-tools___launch_job", "a___b___launch_job"]
-)
-def test_prefixed_and_unprefixed_tool_names_are_judged_alike(tool: str) -> None:
-    result = decide(make_event(tool), make_store(), LIMITS, NOW)
-
-    assert result.answer["decision"] == "allow"
-    assert result.record["tool"] == "launch_job"
-
-
-def test_prefix_does_not_let_an_over_cap_launch_through() -> None:
-    store = make_store(disc_spend_usd={"disc-1": Decimal("0.90")})
-
-    assert_denied(decide(make_event("fareguard-tools___launch_job"), store, LIMITS, NOW), "R2")
-
-
-@pytest.mark.parametrize(
-    ("name", "expected"),
+    ("tool", "tool_input"),
     [
-        ("launch_job", "launch_job"),
-        ("target___launch_job", "launch_job"),
-        ("a___b___read_ledger", "read_ledger"),
-        ("target___", ""),
-        ("___", ""),
-        ("launch__job", "launch__job"),
-        ("", ""),
+        ("other___read_ledger", {}),
+        ("evil___launch_job", LAUNCH_INPUT),
+        ("fareguard___evil___launch_job", LAUNCH_INPUT),
+        ("read_ledger", {}),
+        ("launch_job", LAUNCH_INPUT),
+        ("shell", {}),
+        ("fareguard___", {}),
+        ("", {}),
     ],
 )
-def test_normalise_tool_name_keeps_what_follows_the_last_separator(
-    name: str, expected: str
+def test_name_without_the_exact_gateway_prefix_is_denied_with_r1(
+    tool: str, tool_input: object
 ) -> None:
-    assert normalise_tool_name(name) == expected
-
-
-def test_tool_name_that_is_only_a_prefix_is_denied_with_r1() -> None:
-    assert_denied(decide(make_event("target___", {}), make_store(), LIMITS, NOW), "R1")
+    assert_denied(decide(make_event(tool, tool_input), make_store(), LIMITS, NOW), "R1")
 
 
 def test_undecided_denies_with_r5_and_names_the_error() -> None:
@@ -479,7 +467,7 @@ def test_undecided_denies_with_r5_and_names_the_error() -> None:
         "hookEventId": "evt-1",
         "sessionId": "session-1",
         "tool": "launch_job",
-        "raw_tool": "launch_job",
+        "raw_tool": "fareguard___launch_job",
         "allowed": False,
         "rule": "R5",
         "detail": None,

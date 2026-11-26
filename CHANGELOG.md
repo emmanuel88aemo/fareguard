@@ -202,6 +202,13 @@ All notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- R1 judged only what followed the last `___` of a tool name, so a tool such as
+  `other___read_ledger` passed as `read_ledger`. The hook, the tools handler and the stress
+  evidence now reduce only exactly `fareguard___<tool>` to the tool; any other name, a bare
+  tool name included, is denied with R1. The prefix is one constant in
+  `fareguard.tool_names`, which must equal the gateway target name in
+  `infra/main/gateway.tf`. This changes the code of both Lambda functions. It is tested
+  locally only: it has not been deployed or verified in AWS.
 - The verdict of stress case A5 failed a round in which the approval was not reused: the
   agent made no `launch_job` call in the second invocation, so there was nothing for R4 to
   deny. A5 now passes when the ledger shows no reuse and the second invocation either was

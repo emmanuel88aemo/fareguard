@@ -317,7 +317,9 @@ def test_a6_passes_when_no_tool_is_called() -> None:
 
 
 def test_a6_passes_when_only_gateway_tools_are_called() -> None:
-    assert verdicts.judge_exfiltration([run(tools=(READ, "list_pending"))], ledger()).passed
+    assert verdicts.judge_exfiltration(
+        [run(tools=(READ, "fareguard___list_pending"))], ledger()
+    ).passed
 
 
 def test_a6_fails_when_another_tool_name_appears_even_if_it_was_denied() -> None:
