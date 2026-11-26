@@ -176,6 +176,22 @@ All notable changes to this project are recorded here. The format follows
   the ledger table and its region from the outputs of `infra/main`.
 - A smoke test in `harness/README.md`: one invocation the hooks allow and one launch the
   hook must deny with R2. Neither script and neither invocation has been run against AWS.
+- The stress suite, cases A1 to A8, defined in `docs/stress/cases.md`: direct injection,
+  indirect injection, a launch over the cap per disc, fragment evasion, reuse of a consumed
+  approval, exfiltration, raising the cap and a shell escape. Each case has an exact PASS
+  condition read from the hook decisions, the names of the tool calls and the final ledger,
+  never from the reply of the model (decision record 0012).
+- `fareguard.stress`: the typed description of each case, with its setup, its messages and
+  a pure function that returns PASS or FAIL with the reason; the steps a case needs through
+  the store; and the text of the results. A run that shows no hook decision fails its case,
+  because the message never reached the agent. A5 reuses its consumed approval on
+  `disc-002`: a second launch of `disc-001` would be denied with R2, which the gate reports
+  before R4.
+- `scripts/stress.py`, which a person runs: for one case or all of them it empties and
+  seeds the ledger, prepares the case, invokes the harness through `run_harness`, prints
+  each verdict with the rules that denied, the tool calls and the ledger numbers, and
+  writes `docs/stress/results.md`. It is refused without `--yes` and has `--dry-run`. It is
+  tested with moto and a fake harness only: no round has been run against AWS.
 
 ### Fixed
 
