@@ -13,6 +13,7 @@ AI assistant runs them. Terraform does not create the harness, so it is not in t
 | `harness/system_prompt.md` | The instructions of the agent, sent as they are |
 | `src/fareguard/harness/config.py` | The pure function that builds the arguments of `CreateHarness` |
 | `src/fareguard/harness/stream.py` | Reads the response stream of `InvokeHarness` into a transcript |
+| `src/fareguard/harness/run.py` | Sends one message through a client it is given and returns the reply, the tool calls, the hook decisions and the stop reasons as one result |
 | `scripts/create_harness.py` | Creates the harness |
 | `scripts/invoke_harness.py` | Sends one message to the harness and prints what happened |
 | `scripts/seed.py` | Puts the ledger in the known state of a stress round, plants the event of case A2 on request, empties it and shows it |

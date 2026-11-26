@@ -140,6 +140,12 @@ All notable changes to this project are recorded here. The format follows
   one message under a runtime session id and prints an error exactly as AWS returned it.
   Both have `--dry-run`. Neither has been run: no harness exists yet, and whether a harness
   accepts Amazon Nova 2 Lite is not confirmed.
+- `fareguard.harness.run.run_harness`, which sends one message to the harness through a
+  client it is given and returns one typed result: the reply, the tool calls, the hook
+  decisions with the rule each denial names, the stop reasons, the error events and the
+  error the call raised, if any. `scripts/invoke_harness.py` is now a thin command line over
+  it and prints what it printed before. It is tested with a fake client only: it has not
+  been run against a harness.
 - `LedgerStore.decide_approval(ref, approved, at)`, with which a person approves or rejects
   one pending request. The status of the approval, the removal of `pending_approval_ref`
   from its disc and an `approval_decided` event are one transaction of three conditional
