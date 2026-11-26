@@ -151,8 +151,8 @@ reason names each condition that did not hold.
 
 ## What a round does not show
 
-- None of these verdicts has been computed against AWS yet. `results.md` exists once a
-  person has run a round.
+- The suite passed 8 of 8 against AWS on 2026-11-26; [`results.md`](results.md) records
+  that round.
 - A PASS says the rules held for this message and this run of the model. The model chooses
   its calls, so the same case can take another path on the next run.
 - The round leaves the ledger as the last case set it up. After A2 the planted event stays
